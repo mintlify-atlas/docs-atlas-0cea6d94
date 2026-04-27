@@ -1,0 +1,139 @@
+---
+title: "Build your first Gova app in 5 minutes"
+description: "Walk through building a counter app with Gova — creating a component, adding reactive state, composing layout, and using the hot-reload CLI."
+---
+
+This guide builds a working counter from scratch. You'll create a Go module, implement a `Viewable` component, wire up reactive state with `gova.State`, arrange widgets with `VStack`, and run the app with hot reload. By the end you'll have a solid mental model of how Gova fits together.
+
+<Note>
+  Make sure you have Go 1.26+ and a C compiler installed before you start. See [Installation](/getting-started/installation) if you haven't done that yet.
+</Note>
+
+## Create the module
+
+```bash
+mkdir counter && cd counter
+go mod init example.com/counter
+go get github.com/nv404/gova@latest
+```
+
+Create a single file:
+
+```bash
+touch main.go
+```
+
+## Implement the Counter component
+
+Gova components are plain Go structs that implement the `Viewable` interface:
+
+```go
+type Viewable interface {
+    Body(s *gova.Scope) gova.View
+}
+```
+
+Add the following to `main.go`:
+
+```go main.go
+package main
+
+import g "github.com/nv404/gova"
+
+type Counter struct{}
+
+func (Counter) Body(s *g.Scope) g.View {
+    count := g.State(s, 0)
+    return g.VStack(
+        g.Text(count.Format("Count: %d")),
+        g.Button("+", func() { count.Update(func(n int) int { return n + 1 }) }),
+        g.Button("-", func() { count.Update(func(n int) int { return n - 1 }) }),
+    )
+}
+
+func main() {
+    g.Run("Counter", g.Component(Counter{}))
+}
+```
+
+### What each piece does
+
+**`g.State(s, 0)`** — creates a reactive integer initialized to `0`. The value is tied to the component's scope: it survives re-renders and is destroyed when the component unmounts.
+
+**`count.Format("Count: %d")`** — returns a `Signal[string]` that automatically updates in the UI every time `count` changes. You don't call `Get()` here; Gova subscribes the widget to the signal directly.
+
+**`count.Update(func(n int) int { return n + 1 })`** — atomically reads the current value, applies the function, writes the result, and schedules a re-render. You can also use `count.Set(value)` for unconditional writes.
+
+**`g.VStack(...)`** — arranges its children vertically from top to bottom.
+
+**`g.Component(Counter{})`** — wraps the `Viewable` struct into a `View` so it can be passed to `g.Run`. Layout constructors accept `Viewable` values directly, but `Run` requires a `View`.
+
+## Run the app
+
+```bash
+go run .
+```
+
+A native window opens with a counter and two buttons. Click **+** and **-** to update the count.
+
+## Hot reload with `gova dev`
+
+Install the CLI if you haven't already:
+
+```bash
+go install github.com/nv404/gova/cmd/gova@latest
+```
+
+Then start the dev server:
+
+```bash
+gova dev .
+```
+
+Every time you save a `.go` file in the module, `gova dev` recompiles and relaunches the window automatically. You don't need to restart the command.
+
+<Tip>
+  Pass a specific package path to `gova dev` when your `main` package is not at the module root: `gova dev ./cmd/myapp`.
+</Tip>
+
+## Full source
+
+Here's the complete, working counter from the Gova examples directory:
+
+<CodeGroup>
+
+```go main.go
+package main
+
+import g "github.com/nv404/gova"
+
+var Counter = g.Define(func(s *g.Scope) g.View {
+    count := g.State(s, 0)
+    return g.VStack(
+        g.Text(count.Format("Count: %d")),
+        g.Button("+", func() { count.Update(func(n int) int { return n + 1 }) }),
+        g.Button("-", func() { count.Update(func(n int) int { return n - 1 }) }),
+    )
+})
+
+func main() { g.Run("Counter", Counter) }
+```
+
+</CodeGroup>
+
+This version uses `g.Define` — a lower-level function that accepts a plain closure — instead of the `Viewable` struct pattern. Both approaches are equivalent; `Define` is more compact for simple components while the struct pattern is better for components that accept props.
+
+## `Define` vs `Viewable`
+
+| | `g.Define(func(s *g.Scope) g.View { ... })` | `Viewable` struct + `Body` method |
+|---|---|---|
+| Props | Closed over from the outer scope | Fields on the struct |
+| Reuse | Fine for one-off components | Preferred for components used in multiple places |
+| Testing | Pass to `gova.TestRender` directly | Wrap with `g.Component(MyStruct{...})` |
+
+## What's next
+
+- Add layout modifiers — try `.Spacing()`, `.Padding()`, and `.Align()` on `VStack`.
+- Explore `HStack` and `ZStack` for horizontal and layered layouts.
+- Learn about [signals and derived state](/state/signals) to compute values from state without storing them separately.
+- See the [todo example](https://github.com/NV404/gova/blob/main/examples/todo/main.go) for a more complete app using `List`, `TextField`, `Toggle`, `Scaffold`, and `ScrollView`.

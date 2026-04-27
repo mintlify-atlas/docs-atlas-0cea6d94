@@ -1,0 +1,119 @@
+---
+title: "Gova components: building UI with plain Go structs"
+description: "Gova components are plain Go structs with a Body method. Learn how to define them with Viewable, compose them, and pass props as struct fields."
+---
+
+A component in Gova is any value whose type satisfies the `Viewable` interface. There are no special base types, no code generation, and no registration step — if a struct has a `Body(s *Scope) View` method, it is a component. This design keeps components ordinary Go values, so they compose naturally, pass type-checking statically, and work without any runtime reflection magic.
+
+## The Viewable interface
+
+```go
+type Viewable interface {
+    Body(s *Scope) View
+}
+```
+
+Every component must implement this one method. Gova calls `Body` every time the component needs to render. Between renders the framework preserves all state, effects, and provided stores that belong to the component's `*Scope`.
+
+## Struct components with typed props
+
+The idiomatic Gova component is a plain struct. Its exported fields are its props. Set them at the call site using a struct literal — no option builders, no string keys, no `any`-typed prop maps.
+
+```go
+type UserCard struct {
+    Name  string
+    Email string
+    OnTap func()
+}
+
+func (v UserCard) Body(s *gova.Scope) gova.View {
+    return gova.HStack(
+        gova.VStack(
+            gova.Text(v.Name).Font(gova.Title),
+            gova.Text(v.Email).Color(gova.Secondary),
+        ),
+        gova.Spacer(),
+    ).OnTap(v.OnTap)
+}
+```
+
+Use the struct as a view directly — no wrapper call needed in most contexts:
+
+```go
+gova.VStack(
+    UserCard{Name: u.Name, Email: u.Email, OnTap: func() { select(u) }},
+    UserCard{Name: v.Name, Email: v.Email, OnTap: func() { select(v) }},
+)
+```
+
+Unset fields take their Go zero value, which acts as the default. A `bool` field defaults to `false`, a `string` defaults to `""`, a `func()` defaults to `nil`. Design your component so zero-value props are safe.
+
+## Anonymous components with Define
+
+`gova.Define` wraps a render closure into a component without declaring a struct. Use it for the application root and for small one-off views that take no parameters.
+
+```go
+func Define(fn func(*Scope) View) View
+```
+
+```go
+var Counter = gova.Define(func(s *gova.Scope) gova.View {
+    count := gova.State(s, 0)
+
+    return gova.VStack(
+        gova.Text(count.Format("count: %d")).Font(gova.Title),
+        gova.Button("+1", func() {
+            count.Update(func(n int) int { return n + 1 })
+        }),
+    ).Spacing(gova.SpaceSM)
+})
+```
+
+Because a `Define` closure captures its enclosing environment at declaration time, it has no natural place to accept parameters. Any component that needs to be configured by its caller should be a `Viewable` struct instead.
+
+## Wrapping a Viewable as a View
+
+Layout constructors like `VStack` and `HStack` accept `any`, so they can take a `Viewable` directly. Entry points that require a typed `View` — `gova.Run`, `gova.RunWithConfig` — cannot. Use `gova.Component` as a thin adapter in those cases:
+
+```go
+func Component(v Viewable) View
+```
+
+```go
+func main() {
+    gova.Run("My App", gova.Component(App{}))
+}
+```
+
+`Component` creates a `componentNode` whose render function delegates to `v.Body`. It adds no overhead beyond the allocation of that node.
+
+## Composition
+
+Compose components by nesting struct literals inside layout constructors. Any argument to `VStack`, `HStack`, `ZStack`, `ScrollView`, or `Group` can be a `View`, a `Viewable`, or `nil` (silently filtered). All three shapes are valid:
+
+```go
+type Sidebar struct{ Items []NavItem }
+
+func (v Sidebar) Body(s *gova.Scope) gova.View {
+    rows := make([]any, len(v.Items))
+    for i, item := range v.Items {
+        rows[i] = NavRow{Item: item} // Viewable passed directly
+    }
+    return gova.VStack(rows...).Spacing(gova.SpaceXS)
+}
+```
+
+Pass a child view as a prop to make a component act as a layout wrapper:
+
+```go
+type Card struct {
+    Content gova.View
+}
+
+func (v Card) Body(s *gova.Scope) gova.View {
+    return gova.VStack(v.Content).
+        Padding(gova.SpaceMD).
+        CornerRadius(8).
+        Background(gova.Surface)
+}
+```

@@ -1,0 +1,146 @@
+---
+title: "macOS dock badge, progress, and menu with NSDockTile"
+description: "Gova exposes NSDockTile badge, progress, and custom menu on macOS through the Dock API. Windows and Linux dock support is planned for a future release."
+---
+
+The `Dock` API lets you update the OS application dock while your app is
+running: set a badge count, show a progress bar over the icon, bounce the icon
+to request attention, or add custom items to the right-click dock menu.
+
+<Warning>
+  Full dock integration is currently macOS-only. On Windows and Linux every
+  call is a silent no-op — your code compiles and runs, but nothing is shown.
+  Windows taskbar and Linux launcher support is planned.
+</Warning>
+
+## Getting the dock handle
+
+```go
+func UseDock(s *Scope) *Dock
+```
+
+`UseDock` returns the process-wide `Dock` handle. The same handle is returned
+regardless of which scope or component calls it, so dock state is global across
+the entire app.
+
+```go
+func (v HomeView) Body(s *gova.Scope) gova.View {
+    dock := gova.UseDock(s)
+    // ...
+}
+```
+
+## Badge
+
+`SetBadge` sets the text shown on the app icon in the dock. Pass `""` to clear
+the badge.
+
+```go
+func (d *Dock) SetBadge(text string)
+```
+
+A common pattern is to drive the badge from reactive state with `UseEffect`:
+
+```go
+func (v HomeView) Body(s *gova.Scope) gova.View {
+    dock := gova.UseDock(s)
+    unread := gova.State(s, 3)
+
+    gova.UseEffect(s, func(ctx context.Context) func() {
+        dock.SetBadge(fmt.Sprintf("%d", unread.Get()))
+        return func() { dock.SetBadge("") }
+    })
+
+    return gova.Text("Home")
+}
+```
+
+The cleanup function returned from `UseEffect` clears the badge when the
+component unmounts.
+
+## Progress
+
+`SetProgress` draws a progress bar over the app icon in the dock.
+
+```go
+func (d *Dock) SetProgress(fraction float64)
+```
+
+`fraction` is in `[0, 1]`. Pass a negative value to hide the indicator:
+
+```go
+dock.SetProgress(0.4)  // show 40 %
+dock.SetProgress(1.0)  // show 100 %
+dock.SetProgress(-1)   // hide
+```
+
+On macOS, the progress bar is rendered by installing a custom `NSView` as the
+dock tile's content view.
+
+## Bounce
+
+`Bounce` requests the user's attention.
+
+```go
+func (d *Dock) Bounce()
+```
+
+On macOS the dock icon bounces. On Windows the taskbar entry flashes. On Linux
+the call is best-effort and depends on the desktop environment.
+
+## Dock menu
+
+`SetMenu` replaces the items shown when the user right-clicks (or
+Control-clicks) the app icon in the dock.
+
+```go
+func (d *Dock) SetMenu(items []DockMenuItem)
+```
+
+```go
+type DockMenuItem struct {
+    Label  string
+    Action func()
+}
+```
+
+- An empty `Label` renders as a separator.
+- A `nil` `Action` renders as a disabled item.
+- Pass `nil` to `SetMenu` to clear the menu entirely.
+
+```go
+dock.SetMenu([]gova.DockMenuItem{
+    {Label: "New window", Action: openWindow},
+    {Label: ""},            // separator
+    {Label: "Preferences", Action: showPrefs},
+})
+```
+
+Wire the menu once on first render using `UseEffect`:
+
+```go
+gova.UseEffect(s, func(ctx context.Context) func() {
+    dock.SetMenu([]gova.DockMenuItem{
+        {Label: "Reset status", Action: func() { status.Set("Cleared.") }},
+        {Label: ""},
+        {Label: "About", Action: func() { status.Set("Gova demo.") }},
+    })
+    return func() { dock.SetMenu(nil) }
+})
+```
+
+On macOS, `SetMenu` installs the `applicationDockMenu:` delegate method at
+runtime via the Objective-C runtime so it composes cleanly with Fyne's own
+application delegate.
+
+## Platform support
+
+| Operation | macOS | Windows | Linux |
+|---|---|---|---|
+| `SetBadge` | Supported | Planned | Planned |
+| `SetProgress` | Supported | Planned | Planned |
+| `Bounce` | Supported | Planned | Planned |
+| `SetMenu` | Supported | Planned | Planned |
+
+On any unsupported platform the call is a silent no-op, so code that calls the
+Dock API runs without modification on all platforms.

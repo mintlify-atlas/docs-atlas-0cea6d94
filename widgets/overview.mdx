@@ -1,0 +1,288 @@
+---
+title: "Widget reference: all Gova UI controls"
+description: "Complete reference for Gova's built-in widgets: Text, Button, TextField, Toggle, Slider, Picker, ProgressBar, Image, Form, TabView, and Divider."
+---
+
+Gova ships a complete set of UI controls covering every common interaction pattern. Each widget is a function that returns a `*viewNode`, which you style with modifier chains and nest freely inside layout primitives like `VStack`, `HStack`, and `Scaffold`.
+
+## Text
+
+```go
+func Text(content any) *viewNode
+```
+
+Renders a text label. Accepts three argument shapes:
+
+- **`string`** — static text, rendered as-is.
+- **`Signal[string]`** — reactive text produced by `StateValue.Format` or `Derived`; patches in place when the underlying state changes without re-rendering the parent.
+- **Any other value** — converted via `fmt.Sprint(content)` and rendered as static text.
+
+```go
+gova.Text("Hello, world").Font(gova.Title).Bold()
+gova.Text(count.Format("%d items")).Font(gova.Caption).Color(gova.Secondary)
+gova.Text(gova.Derived(count, func(n int) string {
+    if n == 1 { return "1 item" }
+    return fmt.Sprintf("%d items", n)
+}))
+```
+
+Typography modifiers: `.Font(FontStyle)`, `.Bold()`, `.Italic()`, `.Strikethrough(bool)`, `.Color(c)`.
+
+Font styles: `Body`, `Title`, `Title2`, `Title3`, `Caption`, `Mono`.
+
+---
+
+## Button
+
+```go
+func Button(label string, handler func()) *viewNode
+func (n *viewNode) Style(s ButtonStyle) *viewNode
+```
+
+A tappable button with a text label and a required handler. Do not apply `.OnTap()` to a `Button` — use the handler argument instead.
+
+```go
+const (
+    ButtonDefault    ButtonStyle = iota
+    ButtonPrimary
+    ButtonDestructive
+)
+```
+
+```go
+gova.Button("Save", onSave).Style(gova.ButtonPrimary)
+gova.Button("Delete", onDelete).Style(gova.ButtonDestructive)
+gova.Button("Cancel", onCancel)
+```
+
+---
+
+## TextField
+
+```go
+func TextField(state *StateValue[string]) *viewNode
+
+func (n *viewNode) Placeholder(p string) *viewNode
+func (n *viewNode) OnSubmit(fn func(string)) *viewNode
+func (n *viewNode) Multiline() *viewNode
+func (n *viewNode) Password() *viewNode
+```
+
+A single-line text input bound to a `*StateValue[string]`. The value updates on every keystroke. `OnSubmit` fires when the user presses Return. `Multiline` switches to a multi-line text area. `Password` masks the input.
+
+```go
+username := gova.State(s, "")
+password := gova.State(s, "")
+
+gova.TextField(username).Placeholder("Username")
+gova.TextField(password).Placeholder("Password").Password()
+
+// Submit on Return
+gova.TextField(query).
+    Placeholder("Search…").
+    OnSubmit(func(q string) { doSearch(q) }).
+    MinHeight(36).
+    Grow()
+```
+
+---
+
+## Toggle
+
+```go
+func Toggle(arg any) *viewNode
+
+func (n *viewNode) Label(label string) *viewNode
+func (n *viewNode) OnChange(fn func(bool)) *viewNode
+```
+
+A checkbox. Accepts either a `*StateValue[bool]` for two-way binding or a plain `bool` for read-only / transient use.
+
+```go
+darkMode := gova.State(s, false)
+
+gova.Toggle(darkMode).Label("Dark Mode")
+
+// Read-only row (e.g. inside a List render function)
+gova.Toggle(todo.Done).OnChange(func(v bool) {
+    todos.Set(setDone(todos.Get(), todo.ID, v))
+})
+```
+
+---
+
+## Slider
+
+```go
+func Slider(arg any) *viewNode
+
+func (n *viewNode) Range(min, max float64) *viewNode
+func (n *viewNode) Step(s float64) *viewNode
+func (n *viewNode) OnSliderChange(fn func(float64)) *viewNode
+```
+
+A continuous value slider. Accepts `*StateValue[float64]` or a plain `float64`. Default range is `0..1`; override with `.Range(min, max)`. `.Step()` snaps to discrete increments.
+
+```go
+volume := gova.State(s, 0.5)
+
+gova.Slider(volume).Range(0, 100).Step(5)
+
+// Read-only with explicit callback
+gova.Slider(0.3).
+    Range(0, 1).
+    OnSliderChange(func(v float64) { setBrightness(v) })
+```
+
+---
+
+## Picker
+
+```go
+func Picker(options []string, selected int) *viewNode
+func (n *viewNode) OnPickerChange(fn func(string)) *viewNode
+
+func PickerOf[T comparable](
+    state *StateValue[T],
+    options []T,
+    label func(T) string,
+) *viewNode
+```
+
+A dropdown selector. `Picker` works with string options and an integer index for the current selection. For typed options use `PickerOf`, which binds directly to a `StateValue` of any comparable type.
+
+```go
+priority := gova.State(s, MediumPriority)
+
+// String-based
+gova.Picker([]string{"Low", "Medium", "High"}, 1).
+    OnPickerChange(func(s string) { setPriority(s) })
+
+// Typed — state is kept in sync automatically
+gova.PickerOf(priority, []Priority{Low, Medium, High},
+    func(p Priority) string { return p.String() })
+```
+
+---
+
+## ProgressBar and ProgressView
+
+```go
+func ProgressBar(value float64) *viewNode
+func ProgressView() *viewNode
+```
+
+`ProgressBar(value)` renders a determinate progress bar; `value` must be in the range `0.0`–`1.0`. `ProgressView()` renders an indeterminate spinner (internally stored as `value: -1`).
+
+```go
+gova.ProgressBar(0.65)                 // 65% complete
+gova.ProgressBar(float64(done) / float64(total))
+
+gova.ProgressView()                    // indeterminate spinner
+gova.Show(isLoading, gova.ProgressView())
+```
+
+---
+
+## Image
+
+```go
+func Image(filePath string) *viewNode
+func AsyncImage(url string) *viewNode
+
+func (n *viewNode) Fill(mode FillMode) *viewNode
+```
+
+`Image` loads from a local file path. `AsyncImage` fetches from a URL asynchronously. Both default to `FillContain`.
+
+```go
+const (
+    FillContain  FillMode = iota  // fit inside, preserving aspect ratio
+    FillCover                     // fill box, cropping if needed
+    FillOriginal                  // render at native resolution
+    FillStretch                   // stretch to fill, ignoring aspect ratio
+)
+```
+
+```go
+gova.Image("assets/logo.png").
+    Frame(80, 80).
+    CornerRadius(12)
+
+gova.AsyncImage("https://example.com/avatar.jpg").
+    Frame(40, 40).
+    Fill(gova.FillCover).
+    CornerRadius(20).
+    AccessibilityLabel("User avatar").
+    AccessibilityRole(gova.RoleImage)
+```
+
+---
+
+## Form
+
+```go
+func Form(items ...FormEntry) *viewNode
+
+type FormEntry struct {
+    Label string
+    View  View
+}
+```
+
+`Form` renders a series of label-value rows in a structured layout. Each `FormEntry` pairs a string label with any `View`.
+
+```go
+gova.Form(
+    gova.FormEntry{"Name",     gova.TextField(name).Placeholder("Full name")},
+    gova.FormEntry{"Email",    gova.TextField(email).Placeholder("you@example.com")},
+    gova.FormEntry{"Priority", gova.PickerOf(priority, priorities, priorityLabel)},
+    gova.FormEntry{"Active",   gova.Toggle(active).Label("Enabled")},
+)
+```
+
+---
+
+## TabView
+
+```go
+func TabView(tabs ...TabEntry) *viewNode
+func Tab(label, icon string, content View) TabEntry
+
+func (n *viewNode) Placement(p TabPlacement) *viewNode
+
+const (
+    TabTop      TabPlacement = iota
+    TabBottom
+    TabLeading
+    TabTrailing
+)
+```
+
+`TabView` renders a multi-tab container. Each tab is created with `Tab(label, icon, content)`. The `icon` field accepts a file path or name and is passed to the underlying Fyne tab item; current examples leave it empty. `Placement` moves the tab bar to the requested edge; default is `TabTop`.
+
+```go
+gova.TabView(
+    gova.Tab("Notes",    "", NotesTab{State: s}),
+    gova.Tab("Archive",  "", ArchiveTab{State: s}),
+    gova.Tab("Settings", "", SettingsTab{State: s}),
+).Placement(gova.TabBottom)
+```
+
+---
+
+## Divider
+
+```go
+func Divider() *viewNode
+```
+
+A horizontal rule that visually separates sections. Place it inside a `VStack` to divide content rows.
+
+```go
+gova.VStack(
+    gova.Text("Section A").Font(gova.Caption).Color(gova.Secondary),
+    gova.Divider(),
+    gova.Text("Section B").Font(gova.Caption).Color(gova.Secondary),
+)
+```

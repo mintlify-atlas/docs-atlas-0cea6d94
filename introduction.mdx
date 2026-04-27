@@ -1,0 +1,92 @@
+---
+title: "Gova: declarative GUI framework for Go"
+description: "Gova lets you build native desktop apps for macOS, Windows, and Linux in pure Go — typed struct components, reactive state, and one static binary."
+---
+
+Gova is a declarative GUI framework for Go. You define your UI as plain Go structs, compose views from layout primitives and widgets, and wire up reactive state with a single function call. The result is a native desktop window — no JavaScript runtime, no embedded browser, no extra assets to ship.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/getting-started/installation">
+    Add Gova to your Go module and run your first native window in minutes.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/getting-started/quickstart">
+    Build a working counter app from scratch — components, state, and layout.
+  </Card>
+  <Card title="Core concepts" icon="lightbulb" href="/concepts/components">
+    Understand components, views, and the scope that ties them together.
+  </Card>
+  <Card title="State & reactivity" icon="bolt" href="/state/state">
+    Learn how State, signals, effects, and stores drive automatic re-renders.
+  </Card>
+</CardGroup>
+
+## What makes Gova different
+
+Gova is designed around Go idioms, not ported from a web or mobile framework. Every public API uses plain structs, interfaces, and generics — no reflection magic, no string keys, no hidden scheduler.
+
+<CardGroup cols={2}>
+  <Card title="Struct components" icon="cube" href="/concepts/components">
+    Declare a `Viewable` struct with typed props. Implement one `Body` method. That's it.
+  </Card>
+  <Card title="Explicit reactive scope" icon="arrows-rotate" href="/concepts/scope">
+    State, signals, and effects live on a `*Scope` you can see and pass around.
+  </Card>
+  <Card title="Layout primitives" icon="table-columns" href="/layout/stacks">
+    `VStack`, `HStack`, `ZStack`, `Scaffold`, `ScrollView`, and `List` — all composable.
+  </Card>
+  <Card title="Native platform integrations" icon="apple" href="/platform/dock">
+    Real `NSAlert`, `NSOpenPanel`, and `NSDockTile` on macOS. Fyne fallbacks on Windows and Linux.
+  </Card>
+  <Card title="Hot reload CLI" icon="terminal" href="/cli/overview">
+    `gova dev` watches Go files, rebuilds on save, and relaunches the window automatically.
+  </Card>
+  <Card title="Headless testing" icon="flask" href="/testing/testrender">
+    `TestRender` renders a component without opening a window so you can assert on the tree.
+  </Card>
+</CardGroup>
+
+## A minimal app
+
+```go main.go
+package main
+
+import g "github.com/nv404/gova"
+
+type Counter struct{}
+
+func (Counter) Body(s *g.Scope) g.View {
+    count := g.State(s, 0)
+    return g.VStack(
+        g.Text(count.Format("Count: %d")).Font(g.Title),
+        g.HStack(
+            g.Button("-", func() { count.Set(count.Get() - 1) }),
+            g.Button("+", func() { count.Set(count.Get() + 1) }),
+        ).Spacing(g.SpaceMD),
+    ).Padding(g.SpaceLG)
+}
+
+func main() {
+    g.Run("Counter", g.Component(Counter{}))
+}
+```
+
+<Steps>
+  <Step title="Install Gova">
+    ```bash
+    go get github.com/nv404/gova@latest
+    ```
+  </Step>
+  <Step title="Write your first component">
+    Implement the `Viewable` interface by adding a `Body(s *gova.Scope) gova.View` method to any struct.
+  </Step>
+  <Step title="Run the app">
+    ```bash
+    go run .
+    ```
+    Or use the CLI for hot reload: `gova dev .`
+  </Step>
+</Steps>
+
+<Note>
+  Gova is pre-1.0. The API will shift before `v1.0.0`. Pin a specific tag in production codebases.
+</Note>

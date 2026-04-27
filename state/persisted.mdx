@@ -1,0 +1,67 @@
+---
+title: "PersistedState: state that survives reloads"
+description: "PersistedState wraps StateValue with JSON persistence to disk, seeding from the file on first render — ideal for preserving UI state across reloads."
+---
+
+`PersistedState` behaves exactly like `State`, but the value is written to a JSON file whenever it changes. On the next render — which during development means after a `gova dev` reload — the value is seeded back from that file.
+
+```go
+func PersistedState[T any](s *Scope, key string, initial T, opts ...PersistOption) *StateValue[T]
+```
+
+The return type is `*StateValue[T]`, so every method you know from regular state (`Get`, `Set`, `Update`, `Format`, `Len`) works the same way.
+
+## Basic usage
+
+```go
+type NoteEditor struct{}
+
+func (NoteEditor) Body(s *gova.Scope) gova.View {
+    draft := gova.PersistedState(s, "note-draft", "")
+
+    return gova.VStack(
+        gova.TextField(draft).Placeholder("Start typing..."),
+    )
+}
+```
+
+When the user types and then saves a source file, the dev server restarts the app and the draft field is restored to exactly what was last typed.
+
+## Storage location
+
+`PersistedState` resolves the storage directory in this order:
+
+1. `PersistDir("...")` option passed at the call site.
+2. The `GOVA_DEV_STATE` environment variable, which `gova dev` sets automatically.
+3. `$XDG_STATE_HOME/gova` if the variable is set.
+4. `~/.cache/gova` as the final fallback.
+
+Each key maps to a single JSON file named `<sanitized-key>.json`. Characters that are unsafe in a filename — anything that is not alphanumeric, `-`, or `_` — are replaced with underscores.
+
+### Overriding the directory
+
+```go
+func PersistDir(dir string) PersistOption
+```
+
+Pass `PersistDir` when you need to write to a specific location, for example during tests:
+
+```go
+draft := gova.PersistedState(s, "note-draft", "", gova.PersistDir("/tmp/myapp-state"))
+```
+
+## Limits and guarantees
+
+<Warning>
+`PersistedState` is not a general-purpose persistence layer. It is designed for small UI state values only.
+</Warning>
+
+- Values are serialized with `encoding/json`. The type must be JSON-encodable.
+- Writes happen on every state change, best-effort. If the filesystem is read-only or the disk is full, the write is silently dropped and the in-memory value is unaffected.
+- Because writes happen on every change, avoid `PersistedState` for high-frequency updates such as values bound to mouse-move or scroll handlers.
+- `PersistedState` is active in all builds, not just dev. If you want state that resets on every launch, use plain `State` instead.
+- There is no automatic cleanup. Delete the state directory to reset persisted values during testing.
+
+Good candidates: selected tab index, text field drafts, filter selections, window layout preferences.
+
+Not suitable for: user-generated content, large collections, anything that should sync across machines or survive an uninstall.

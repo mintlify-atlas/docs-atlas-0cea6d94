@@ -1,0 +1,225 @@
+---
+title: "Native file dialogs on macOS and other platforms"
+description: "Gova provides native NSOpenPanel and NSSavePanel on macOS, with Fyne-based fallbacks on Windows and Linux, all behind a single cross-platform API."
+---
+
+Gova wraps OS-level dialogs — alerts, confirmations, file pickers, save panels, and folder pickers — in a uniform fluent API. On macOS each dialog is truly native: `NativeAlert` and `NativeConfirm` use `NSAlert`, while `FilePicker`, `SavePicker`, and `FolderPicker` use `NSOpenPanel` or `NSSavePanel`. On Windows and Linux the same builders produce Fyne-drawn popups today, with native bridges planned. Your code never branches on the platform.
+
+## Builder overview
+
+```go
+func NativeAlert(title, message string)  *NativeAlertBuilder
+func NativeConfirm(title, message string) *NativeConfirmBuilder
+func FilePicker()                         *FilePickerBuilder
+func SavePicker()                         *SavePickerBuilder
+func FolderPicker()                       *FolderPickerBuilder
+```
+
+Every builder follows the same fluent pattern: chain option methods, then call `.Present(s)` to display the dialog against the window backing the given `*Scope`. Unset callbacks are treated as no-ops, so you only wire the handlers you care about.
+
+---
+
+## NativeAlert
+
+A single-button informational dialog. Use it to acknowledge errors, confirm non-reversible actions that have already happened, or surface status messages.
+
+```go
+func NativeAlert(title, message string) *NativeAlertBuilder
+```
+
+| Method | Purpose |
+|---|---|
+| `OK(label string)` | Override the dismiss-button label (default: `"OK"`) |
+| `OnClose(fn func())` | Run `fn` after the user dismisses the dialog |
+| `Present(s *Scope)` | Show the dialog |
+
+```go
+gova.NativeAlert("File saved", "Your document has been saved to disk.").
+    OK("Got it").
+    OnClose(func() {
+        // optional follow-up
+    }).
+    Present(s)
+```
+
+---
+
+## NativeConfirm
+
+A two-button dialog for actions that require explicit user consent — especially destructive ones.
+
+```go
+func NativeConfirm(title, message string) *NativeConfirmBuilder
+```
+
+| Method | Purpose |
+|---|---|
+| `Confirm(label string)` | Override the confirm-button label (default: `"Confirm"`) |
+| `Cancel(label string)` | Override the cancel-button label (default: `"Cancel"`) |
+| `Destructive()` | Style the confirm button as a warning action |
+| `OnConfirm(fn func())` | Run `fn` when the user taps confirm |
+| `OnCancel(fn func())` | Run `fn` when the user taps cancel |
+| `Present(s *Scope)` | Show the dialog |
+
+```go
+gova.NativeConfirm("Delete note?", "This cannot be undone.").
+    Destructive().
+    Confirm("Delete").
+    Cancel("Keep").
+    OnConfirm(func() {
+        deleteNote(noteID)
+    }).
+    Present(s)
+```
+
+On macOS, `Destructive()` sets `NSAlertStyleCritical` and marks the confirm button with `hasDestructiveAction`, so macOS renders it in the platform's red warning style automatically.
+
+---
+
+## FilePicker
+
+Let the user choose an existing file to read.
+
+```go
+func FilePicker() *FilePickerBuilder
+```
+
+| Method | Purpose |
+|---|---|
+| `Types(exts ...string)` | Restrict visible files to the given extensions |
+| `StartDir(path string)` | Open the picker in this directory |
+| `OnPick(fn func(path string))` | Called with the selected absolute path |
+| `OnCancel(fn func())` | Called when the user dismisses without choosing |
+| `OnError(fn func(err error))` | Called when a system error occurs |
+| `Present(s *Scope)` | Show the dialog |
+
+```go
+gova.FilePicker().
+    Types(".png", ".jpg", ".jpeg").
+    StartDir(homeDir).
+    OnPick(func(path string) {
+        loadImage(path)
+    }).
+    OnError(func(err error) {
+        log.Println("file picker error:", err)
+    }).
+    Present(s)
+```
+
+`Types` accepts extensions with or without the leading dot and normalises them to lowercase. Pass no types to show every file. The callback receives an absolute filesystem path; the dialog has already released its handle, so open the file yourself.
+
+---
+
+## SavePicker
+
+Let the user choose a destination path for a new or existing file.
+
+```go
+func SavePicker() *SavePickerBuilder
+```
+
+| Method | Purpose |
+|---|---|
+| `Default(name string)` | Pre-fill the filename field |
+| `Types(exts ...string)` | Restrict the visible files to the given extensions |
+| `StartDir(path string)` | Open the picker in this directory |
+| `OnSave(fn func(path string))` | Called with the chosen destination path |
+| `OnCancel(fn func())` | Called when the user cancels |
+| `OnError(fn func(err error))` | Called when a system error occurs |
+| `Present(s *Scope)` | Show the dialog |
+
+```go
+gova.SavePicker().
+    Default("untitled.md").
+    Types(".md", ".txt").
+    StartDir(projectDir).
+    OnSave(func(path string) {
+        if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+            log.Println(err)
+        }
+    }).
+    Present(s)
+```
+
+On platforms where it is idiomatic, the OS dialog enforces its own "overwrite existing file?" prompt before invoking `OnSave`.
+
+---
+
+## FolderPicker
+
+Let the user choose a directory.
+
+```go
+func FolderPicker() *FolderPickerBuilder
+```
+
+| Method | Purpose |
+|---|---|
+| `StartDir(path string)` | Open the picker in this directory |
+| `OnPick(fn func(path string))` | Called with the selected folder path |
+| `OnCancel(fn func())` | Called when the user cancels |
+| `OnError(fn func(err error))` | Called when a system error occurs |
+| `Present(s *Scope)` | Show the dialog |
+
+```go
+gova.FolderPicker().
+    StartDir("/Users").
+    OnPick(func(path string) {
+        loadWorkspace(path)
+    }).
+    Present(s)
+```
+
+---
+
+## Async pattern and callbacks
+
+All dialogs are presented modally — `Present` returns immediately and the dialog runs its lifecycle asynchronously. Results arrive through the callbacks you registered:
+
+```
+Present(s) → dialog opens modally → user interacts → OnPick / OnSave / OnConfirm / OnCancel / OnError
+```
+
+Because dialogs are modal and async, do not rely on any state set synchronously after `Present` returns. Always handle the result inside the relevant callback.
+
+---
+
+## Error handling
+
+`OnError` fires for system-level failures: the OS refusing permission, the underlying panel returning an error code, and so on. It does not fire when the user simply cancels — that triggers `OnCancel` instead. A minimal defensive pattern:
+
+```go
+gova.FilePicker().
+    OnPick(func(path string) {
+        processFile(path)
+    }).
+    OnCancel(func() {
+        // user changed their mind — nothing to do
+    }).
+    OnError(func(err error) {
+        gova.NativeAlert("Could not open file", err.Error()).Present(s)
+    }).
+    Present(s)
+```
+
+---
+
+## Platform support
+
+On **macOS** all dialogs are native. Alerts and confirms are built on `NSAlert`; file and folder pickers are built on `NSOpenPanel` or `NSSavePanel`. Dialogs attach as sheets to the key window when one is available, and fall back to free-standing modals otherwise.
+
+On **Windows** and **Linux** the dialogs currently use Fyne-drawn popups inside the app window. Native bridges (`TaskDialog` / `IFileDialog` on Windows; portal-based pickers on Linux) are planned; the public API will not change when they land.
+
+| Dialog | macOS | Windows | Linux |
+|---|---|---|---|
+| `NativeAlert` | Native (`NSAlert`) | Fyne fallback | Fyne fallback |
+| `NativeConfirm` | Native (`NSAlert`) | Fyne fallback | Fyne fallback |
+| `FilePicker` | Native (`NSOpenPanel`) | Fyne fallback | Fyne fallback |
+| `SavePicker` | Native (`NSSavePanel`) | Fyne fallback | Fyne fallback |
+| `FolderPicker` | Native (`NSOpenPanel`) | Fyne fallback | Fyne fallback |
+
+---
+
+## How `Present` finds the window
+
+`Present(s)` walks the scope tree to find the `dialogPresenter` published by `gova.RunWithConfig`. In tests, scopes created without the runtime return a silent no-op — no real dialog is opened, which keeps unit tests from blocking on OS UI.

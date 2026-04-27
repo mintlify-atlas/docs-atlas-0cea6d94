@@ -1,0 +1,107 @@
+---
+title: "Signals and derived reactive values"
+description: "Signals let you derive reactive values from state without triggering extra renders. Learn Format, Derived, and how signals compose with Text widgets."
+---
+
+A `Signal[T]` is a reactive value that other parts of the framework can subscribe to. Rather than re-rendering a whole component whenever state changes, signals let the renderer patch only the affected widget in place.
+
+```go
+type Signal[T any] interface {
+    Value() T
+    // subscribe is unexported — used by the renderer and widgets
+}
+```
+
+Signals are produced by `StateValue.Format` and `Derived`. You don't implement the interface yourself.
+
+## Format signals
+
+`StateValue[T].Format(format)` returns a `Signal[string]` by applying `fmt.Sprintf(format, current)` to the state's value. Each time the state changes the signal's value updates automatically.
+
+```go
+func (s *StateValue[T]) Format(format string) Signal[string]
+```
+
+Pass the result to `Text` and the renderer subscribes to the signal instead of re-rendering the entire component:
+
+```go
+count := gova.State(s, 0)
+
+gova.Text(count.Format("Count: %d"))
+```
+
+Without `Format` you would write `gova.Text(fmt.Sprintf("Count: %d", count.Get()))`, which produces a static string on every render. With `Format`, the label updates in place when `count` changes — no full re-render needed.
+
+## Derived signals
+
+`Derived[T, U]` transforms a `*StateValue[T]` into a `Signal[U]` using an arbitrary function.
+
+```go
+func Derived[T any, U any](state *StateValue[T], fn func(T) U) Signal[U]
+```
+
+The function runs once at creation time and again each time the source state changes.
+
+```go
+type Model struct {
+    Todos []Todo
+}
+
+model := gova.State(s, Model{})
+
+itemCount := gova.Derived(model, func(m Model) string {
+    return fmt.Sprintf("%d items", len(m.Todos))
+})
+
+gova.Text(itemCount)
+```
+
+Any transformation works — booleans, integers, or structs. If the output type is `string`, pass it directly to `Text`. For other types, call `.Value()` to read the current value inside an event handler or another derived expression.
+
+## Memoization
+
+Both `Format` and `Derived` are memoized by call site. When the same line in a `Body` function is reached on successive renders, the existing signal is returned rather than a new one being created. This means:
+
+- No subscription leak as the component re-renders repeatedly.
+- The transform function provided to `Derived` is captured on first call; a freshly allocated closure on a later render does not replace it.
+
+```go
+// Safe: same line every render → same signal instance
+label := gova.Derived(model, func(m Model) string {
+    return fmt.Sprintf("%d notes", len(m.Notes))
+})
+```
+
+## Passing signals to Text
+
+`Text` accepts either a plain `string` or a `Signal[string]`:
+
+- `string` — rendered as static text, updated only when the component re-renders.
+- `Signal[string]` — the renderer subscribes and patches the label whenever the signal fires, without a full component re-render.
+
+```go
+gova.Text("hello")                    // static
+gova.Text(count.Format("total: %d"))  // reactive — patches in place
+gova.Text(itemCount)                  // reactive — same as above via Derived
+```
+
+Passing any other type panics at construction time.
+
+## DerivedList
+
+When you need to derive a slice from a struct-typed state and pass it to `List`, use `DerivedList` instead of `Derived`. It returns a `*StateValue[[]T]` rather than a `Signal[[]T]`, which `List` and `ListOf` require.
+
+```go
+func DerivedList[M any, T any](source *StateValue[M], extract func(M) []T) *StateValue[[]T]
+```
+
+```go
+todos := gova.DerivedList(model, func(m Model) []Todo { return m.Todos })
+
+gova.List(todos,
+    func(t Todo) int  { return t.ID },
+    func(i int, t Todo) gova.View { return gova.Text(t.Text) },
+)
+```
+
+The derived state is effectively read-only. Mutate the source state and the derived slice updates automatically.

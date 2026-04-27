@@ -1,0 +1,123 @@
+{
+  "projectType": "framework",
+  "projectName": "Gova",
+  "projectDescription": "A declarative GUI framework for Go that lets developers build native desktop apps for macOS, Windows, and Linux using typed struct components, reactive state, and a single static binary.",
+  "theme": "palm",
+  "primaryColor": "#84847c",
+  "lightColor": "#161616",
+  "darkColor": "#e9e9da",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "getting-started/installation",
+              "getting-started/quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/components",
+              "concepts/views",
+              "concepts/scope"
+            ]
+          },
+          {
+            "group": "State & Reactivity",
+            "pages": [
+              "state/state",
+              "state/signals",
+              "state/effects",
+              "state/stores",
+              "state/persisted"
+            ]
+          },
+          {
+            "group": "Layout & Widgets",
+            "pages": [
+              "layout/stacks",
+              "layout/scaffold",
+              "layout/lists",
+              "layout/modifiers",
+              "widgets/overview"
+            ]
+          },
+          {
+            "group": "Navigation & Overlays",
+            "pages": [
+              "navigation/navstack",
+              "overlays/alerts",
+              "overlays/native-dialogs"
+            ]
+          },
+          {
+            "group": "Platform & Theming",
+            "pages": [
+              "platform/app-icon",
+              "platform/dock",
+              "theming/themes"
+            ]
+          },
+          {
+            "group": "CLI & Testing",
+            "pages": [
+              "cli/overview",
+              "testing/testrender"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Struct-based declarative components with a single Body method",
+    "Call-site reactive state (State, StateKey) with automatic re-renders",
+    "Derived signals and format signals for reactive string binding",
+    "Scoped stores (Provide/UseStore) for cross-component shared state",
+    "PersistedState that survives hot-reload across gova dev sessions",
+    "UseEffect and UseAsync for side effects and async data loading",
+    "VStack, HStack, ZStack, Scaffold, ScrollView layout primitives",
+    "NavStack with UseNav and NavLink for typed navigation",
+    "Native macOS dialogs (NSAlert, NSOpenPanel, NSSavePanel, NSDockTile)",
+    "Modifier chains for styling (padding, font, color, accessibility)",
+    "gova dev hot-reload CLI with file watching and window relaunch",
+    "Headless TestRender for unit-testing components without a display"
+  ],
+  "publicApiSurface": [
+    "Run(title string, root View)",
+    "RunWithConfig(config AppConfig, root View)",
+    "Component(v Viewable) View",
+    "Define(fn func(*Scope) View) View",
+    "State[T](s *Scope, initial T) *StateValue[T]",
+    "StateKey[T](s *Scope, key string, initial T) *StateValue[T]",
+    "Ref[T](s *Scope, initial T) *RefValue[T]",
+    "UseEffect(s *Scope, fn func(ctx context.Context) func())",
+    "UseAsync[T](s *Scope, fn func(ctx context.Context) (T, error)) (T, error, bool)",
+    "Derived[T, U](state *StateValue[T], fn func(T) U) Signal[U]",
+    "Provide[T](s *Scope, key *StoreKey[T], initial T)",
+    "UseStore[T](s *Scope, key *StoreKey[T]) *StateValue[T]",
+    "PersistedState[T](s *Scope, key string, initial T, opts ...PersistOption) *StateValue[T]",
+    "VStack(children ...any) *viewNode",
+    "HStack(children ...any) *viewNode",
+    "ZStack(children ...any) *viewNode",
+    "Scaffold(center any) *viewNode",
+    "ScrollView(child any) *viewNode",
+    "Text(content any) *viewNode",
+    "Button(label string, handler func()) *viewNode",
+    "TextField(state *StateValue[string]) *viewNode",
+    "Toggle(state *StateValue[bool]) *viewNode",
+    "Slider(state *StateValue[float64]) *viewNode",
+    "List(count int, renderFn func(i int) View) *viewNode",
+    "NavStack(root any) *viewNode",
+    "UseNav(s *Scope) *NavHandle",
+    "NavLink(label string, dest any) *viewNode",
+    "gova dev [pkg]",
+    "gova build [pkg]",
+    "gova run [pkg]"
+  ]
+}

@@ -1,0 +1,139 @@
+---
+title: "Reactive state with State and StateValue"
+description: "Use State[T] to create per-component reactive values that trigger re-renders on change. Covers Get, Set, Update, Len, and call-site identity rules."
+---
+
+`State[T]` is how a component owns a value that drives what it renders. When you call `Set` or `Update`, the owning component re-renders and the new value is reflected in the view.
+
+## Creating state
+
+```go
+func State[T any](s *Scope, initial T) *StateValue[T]
+func StateKey[T any](s *Scope, key string, initial T) *StateValue[T]
+```
+
+`State` keys the value on the call site — the file path and line number captured by `runtime.Caller`. Each distinct call site gets its own state cell. On the first render the cell is created with `initial`; on every subsequent render the same cell is returned and `initial` is ignored.
+
+`StateKey` lets you supply an explicit string key. Use it in loops or conditional branches where the call site isn't stable across renders.
+
+```go
+var Counter = gova.Define(func(s *gova.Scope) gova.View {
+    count := gova.State(s, 0)
+    name  := gova.State(s, "world")
+    // ...
+})
+```
+
+## Reading and writing
+
+```go
+func (s *StateValue[T]) Get() T
+func (s *StateValue[T]) Set(v T)
+func (s *StateValue[T]) Update(fn func(T) T)
+func (s *StateValue[T]) SetSilent(v T)
+func (s *StateValue[T]) Len() int
+func (s *StateValue[T]) Format(format string) Signal[string]
+```
+
+- **`Get`** returns the current value. Safe to call from any goroutine.
+- **`Set`** replaces the value and schedules a re-render.
+- **`Update`** performs a read-modify-write under the state's internal lock. Use it when the new value depends on the old one — this avoids a race between `Get` and `Set` in concurrent code.
+- **`SetSilent`** updates the value without scheduling a re-render. Widgets such as `TextField` use this to sync keystrokes back without triggering a reconciliation cycle that would fight the cursor. You rarely need it in application code.
+- **`Len`** returns the length of the underlying value when `T` is a slice, map, string, array, or channel. Panics on any other type.
+- **`Format`** derives a reactive `Signal[string]` via `fmt.Sprintf`. See [Signals](/state/signals) for details.
+
+### Counter example
+
+```go
+var Counter = gova.Define(func(s *gova.Scope) gova.View {
+    count := gova.State(s, 0)
+
+    return gova.VStack(
+        gova.Text(count.Format("Count: %d")),
+        gova.Button("+", func() {
+            count.Update(func(n int) int { return n + 1 })
+        }),
+        gova.Button("-", func() {
+            count.Update(func(n int) int { return n - 1 })
+        }),
+    )
+})
+```
+
+### Todo list example
+
+`Update` is especially useful for struct-typed state where several fields change together:
+
+```go
+type Todo struct {
+    ID   int
+    Text string
+    Done bool
+}
+
+type Model struct {
+    Todos  []Todo
+    NextID int
+}
+
+var TodoApp = gova.Define(func(s *gova.Scope) gova.View {
+    model := gova.State(s, Model{NextID: 1})
+    input := gova.State(s, "")
+
+    add := func() {
+        text := input.Get()
+        if text == "" {
+            return
+        }
+        model.Update(func(m Model) Model {
+            m.Todos = append(m.Todos, Todo{ID: m.NextID, Text: text})
+            m.NextID++
+            return m
+        })
+        input.Set("")
+    }
+
+    // ...
+})
+```
+
+## Non-reactive refs
+
+```go
+func Ref[T any](s *Scope, initial T) *RefValue[T]
+
+func (r *RefValue[T]) Get() T
+func (r *RefValue[T]) Set(v T)
+```
+
+`Ref[T]` is like `State[T]` but mutations never schedule a re-render. Use it for values that need to survive across renders without affecting the view — timers, abort handles, counters used only inside event handlers.
+
+```go
+var timerRef = gova.Ref(s, (*time.Timer)(nil))
+
+gova.Button("Start", func() {
+    if t := timerRef.Get(); t != nil {
+        t.Stop()
+    }
+    timerRef.Set(time.AfterFunc(5*time.Second, func() {
+        fmt.Println("ping")
+    }))
+})
+```
+
+## Call-site identity rules
+
+- **Do not call `State` conditionally.** If the call is skipped on one render and reached on a later one, the runtime line mapping shifts and you will create a new cell rather than retrieve the existing one.
+- **Do not move a `State` call to a different line** between renders. During development with `gova dev` this rarely matters since the whole app restarts on a reload, but it can produce unexpected behavior during hot-reload experimentation.
+- **Use `StateKey` for dynamic keys.** When you need separate state cells for items in a list, pass a stable identifier as the key:
+
+```go
+for _, item := range items {
+    itemState := gova.StateKey(s, fmt.Sprintf("item-%d", item.ID), item)
+    // ...
+}
+```
+
+## Concurrency
+
+`StateValue[T]` is safe to read and write from any goroutine. All mutations take an internal `sync.RWMutex` and re-renders are dispatched through Gova's UI scheduling loop.

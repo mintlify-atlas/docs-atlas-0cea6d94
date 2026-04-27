@@ -1,0 +1,115 @@
+---
+title: "Scaffold: border layout for app structure"
+description: "Scaffold provides a border-layout primitive with a required center region and optional top, bottom, leading, and trailing edges for toolbars and sidebars."
+---
+
+`Scaffold` is Gova's border-layout primitive. It divides the available space into a required center region and up to four optional edge regions: top, bottom, leading (left in LTR), and trailing (right in LTR). The center fills all space the edges do not claim.
+
+```go
+func Scaffold(center any) *viewNode
+
+func (n *viewNode) Top(v any) *viewNode
+func (n *viewNode) Bottom(v any) *viewNode
+func (n *viewNode) Leading(v any) *viewNode
+func (n *viewNode) Trailing(v any) *viewNode
+```
+
+## Basic structure
+
+Pass the center view to `Scaffold()` and attach edge views via chain methods. Omit any edge you do not need — no `nil` placeholders required.
+
+```go
+gova.Scaffold(
+    gova.ScrollView(content),
+).
+    Top(
+        gova.HStack(
+            gova.Text("My App").Font(gova.Title).Bold().Grow(),
+            gova.Button("New", onNew),
+        ).Padding(gova.SpaceMD),
+    ).
+    Bottom(
+        gova.HStack(
+            gova.TextField(input).Placeholder("Write a message…").Grow(),
+            gova.Button("Send", onSend),
+        ).Padding(gova.SpaceSM),
+    )
+```
+
+## Adding a sidebar
+
+Use `Leading` or `Trailing` for sidebars or navigation panels.
+
+```go
+gova.Scaffold(
+    gova.ScrollView(mainContent),
+).
+    Leading(
+        gova.VStack(
+            navItems...,
+        ).Frame(200, 0).Background(gova.Surface),
+    ).
+    Top(toolbar)
+```
+
+## Pairing with ScrollView
+
+The center region is typically a `ScrollView` so content that exceeds the visible area is scrollable. `ScrollView` defaults to vertical scrolling; change direction with `.ScrollDirection()`.
+
+```go
+func ScrollView(children ...any) *viewNode
+
+func (n *viewNode) ScrollDirection(d scrollDirection) *viewNode
+
+const (
+    ScrollVertical   scrollDirection = iota
+    ScrollHorizontal
+    ScrollBoth
+)
+```
+
+```go
+gova.Scaffold(
+    gova.ScrollView(
+        gova.VStack(items...).Spacing(gova.SpaceSM).Padding(gova.SpaceMD),
+    ).ScrollDirection(gova.ScrollVertical),
+).Top(header)
+```
+
+## Sizing rules
+
+Each edge view is measured at its natural size along the axis it pins:
+
+- Top and Bottom edges use their natural height; width fills the full scaffold width.
+- Leading and Trailing edges use their natural width; height fills between the top and bottom edges.
+- The center takes all remaining space.
+
+If the edges need more complex internal layout, nest a `VStack` or `HStack` inside them.
+
+## Full example: notes app shell
+
+```go
+func AppShell(s *gova.Scope) gova.View {
+    query := gova.State(s, "")
+
+    toolbar := gova.HStack(
+        gova.Text("Notes").Font(gova.Title).Bold().Grow(),
+        gova.Button("Add", onAdd),
+    ).Padding(gova.SpaceMD).Background(gova.Surface)
+
+    sidebar := gova.VStack(
+        gova.Text("All Notes").Font(gova.Caption).Color(gova.Secondary),
+        gova.Divider(),
+        gova.Text("Favourites").Font(gova.Caption).Color(gova.Secondary),
+    ).
+        Padding(gova.SpaceMD).
+        Frame(180, 0).
+        Background(gova.Surface)
+
+    center := gova.ScrollView(
+        NoteList{Query: query},
+    )
+
+    return gova.Scaffold(center).Top(toolbar).Leading(sidebar)
+}
+```

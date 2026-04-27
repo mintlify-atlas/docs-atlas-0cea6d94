@@ -1,0 +1,174 @@
+---
+title: "Side effects with UseEffect and UseAsync"
+description: "UseEffect, UseAsync, and UseAnimation: run side effects on mount, load async data with loading/error/data state, and drive frame animations in Gova."
+---
+
+Gova provides two hooks for side effects: `UseEffect` for arbitrary imperative work with a cleanup phase, and `UseAsync` for one-shot loads whose result drives the view.
+
+## UseEffect
+
+```go
+func UseEffect(s *Scope, fn func(ctx context.Context) func())
+```
+
+The callback runs **once per mount**. The `context.Context` is cancelled when the component unmounts. If the callback returns a non-nil function, that function is called on unmount — use it to stop goroutines, close connections, or release resources.
+
+`UseEffect` is call-site keyed the same way `State` is: the same effect is not re-run on every render.
+
+### Ticker example
+
+```go
+type Clock struct{}
+
+func (Clock) Body(s *gova.Scope) gova.View {
+    now := gova.State(s, time.Now())
+
+    gova.UseEffect(s, func(ctx context.Context) func() {
+        ticker := time.NewTicker(time.Second)
+        go func() {
+            for {
+                select {
+                case <-ctx.Done():
+                    return
+                case t := <-ticker.C:
+                    now.Set(t)
+                }
+            }
+        }()
+        return func() { ticker.Stop() }
+    })
+
+    return gova.Text(now.Format("15:04:05"))
+}
+```
+
+The goroutine exits when the context is cancelled (component unmount). The cleanup function stops the ticker. Neither runs again until the component remounts.
+
+### HTTP request example
+
+```go
+gova.UseEffect(s, func(ctx context.Context) func() {
+    go func() {
+        req, _ := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            return // context cancelled or network error
+        }
+        defer resp.Body.Close()
+        // update state with response...
+    }()
+    return nil // no cleanup needed beyond context cancellation
+})
+```
+
+## UseAsync
+
+```go
+func UseAsync[T any](s *Scope, fn func(ctx context.Context) (T, error)) (T, error, bool)
+```
+
+`UseAsync` runs the function in a goroutine and returns `(data, err, loading)`.
+
+| Render | `data` | `err` | `loading` |
+| --- | --- | --- | --- |
+| First (goroutine running) | zero value | `nil` | `true` |
+| After goroutine completes | result | error or `nil` | `false` |
+
+When the goroutine finishes, it updates the component's state and triggers a re-render with the final values. The context is cancelled on unmount so the goroutine can exit cleanly without writing to a detached scope.
+
+Like `UseEffect`, `UseAsync` is call-site keyed — the goroutine is started on first mount, not on every render.
+
+### User card example
+
+```go
+type UserCard struct{ UserID string }
+
+func (v UserCard) Body(s *gova.Scope) gova.View {
+    user, err, loading := gova.UseAsync(s, func(ctx context.Context) (User, error) {
+        return fetchUser(ctx, v.UserID)
+    })
+
+    if loading {
+        return gova.ProgressView()
+    }
+    if err != nil {
+        return gova.Text(err.Error()).Color(gova.Destructive)
+    }
+    return gova.Text(user.Name).Font(gova.Title)
+}
+```
+
+The three return values map naturally to the three states a remote resource can be in: loading, failed, or ready.
+
+<Warning>
+`UseAsync` re-runs when the component re-mounts, not when props change. If you need to re-fetch when an input value changes, use `UseEffect` with a `State` that you update manually, or key a new component mount on the changing value.
+</Warning>
+
+## UseAnimation
+
+`UseAnimation` drives a numeric progress value from `0.0` to `1.0` over a given duration, calling a tick function at roughly 60 fps.
+
+```go
+func UseAnimation(s *Scope, anim Animation) *AnimationHandle
+
+func Animate(duration time.Duration) Animation
+
+type Animation struct {
+    Duration    time.Duration
+    Curve       EaseCurve
+    AutoReverse bool
+    RepeatCount int // -1 = forever
+}
+
+const AnimateForever = -1
+```
+
+Build an `Animation` with `Animate`, then configure it with method calls:
+
+```go
+func (a Animation) WithCurve(c EaseCurve) Animation
+func (a Animation) Reversed() Animation
+func (a Animation) Repeat(n int) Animation
+```
+
+`UseAnimation` returns an `*AnimationHandle` backed by a `Ref`, so it survives across renders without triggering re-renders by itself.
+
+```go
+func (h *AnimationHandle) Start(tick func(float32))
+func (h *AnimationHandle) Stop()
+func (h *AnimationHandle) Running() bool
+```
+
+### Ease curves
+
+```go
+const (
+    EaseLinear EaseCurve = iota
+    EaseInOut                    // default
+    EaseIn
+    EaseOut
+)
+```
+
+### Fade example
+
+Use `FadeColor` with an animation to fade a view in on mount:
+
+```go
+func (v FadeIn) Body(s *gova.Scope) gova.View {
+    opacity := gova.State(s, float32(0))
+
+    anim := gova.UseAnimation(s, gova.Animate(300*time.Millisecond))
+
+    gova.UseEffect(s, func(ctx context.Context) func() {
+        anim.Start(func(progress float32) {
+            opacity.Set(progress)
+        })
+        return anim.Stop
+    })
+
+    return gova.Text("Hello").Opacity(float64(opacity.Get()))
+}
+```
+
+The `RepeatCount` of `-1` (`AnimateForever`) repeats indefinitely. Call `Stop` to halt it, typically from a cleanup function or a button handler.

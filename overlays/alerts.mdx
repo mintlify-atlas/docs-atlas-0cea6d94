@@ -1,0 +1,146 @@
+---
+title: "Alerts and modal sheets in Gova"
+description: "Show alert dialogs and modal bottom sheets from any component using UseOverlay. Covers alert actions, custom sheet content, and dismiss callbacks."
+---
+
+Gova gives every component access to two imperative overlay primitives — `UseAlert` for modal dialogs that block input, and `UseSheet` for overlay surfaces that sit above the main content without replacing it. Both hooks work from any component in the tree and require no global state or prop-drilling.
+
+## Alerts
+
+```go
+func UseAlert(s *Scope) func(title, message string, actions ...AlertAction)
+```
+
+`UseAlert` returns a function you store in a local variable and call from event handlers. Pass a title, a message, and any number of `AlertAction` values.
+
+### AlertAction
+
+```go
+type AlertAction struct {
+    Label  string
+    Style  ActionStyle
+    Action func()
+}
+
+type ActionStyle int
+
+const (
+    ActionDefault     ActionStyle = iota
+    ActionCancel
+    ActionDestructive
+)
+```
+
+| Style | Appearance |
+|---|---|
+| `ActionDefault` | Standard button; used for neutral or confirm actions |
+| `ActionCancel` | Visually de-emphasised; typically placed first |
+| `ActionDestructive` | Highlighted as dangerous (red text on macOS) |
+
+`Action` is the callback invoked after the alert is dismissed. It is optional — leave it `nil` for buttons that only close the dialog.
+
+### Example: confirmation before delete
+
+```go
+type DeleteButton struct{ OnDelete func() }
+
+func (v DeleteButton) Body(s *gova.Scope) gova.View {
+    showAlert := gova.UseAlert(s)
+
+    return gova.Button("Delete", func() {
+        showAlert("Are you sure?", "This action cannot be undone.",
+            gova.AlertAction{
+                Label: "Cancel",
+                Style: gova.ActionCancel,
+            },
+            gova.AlertAction{
+                Label:  "Delete",
+                Style:  gova.ActionDestructive,
+                Action: v.OnDelete,
+            },
+        )
+    }).Color(gova.Red)
+}
+```
+
+An alert blocks all input until the user taps an action. The `Action` callback runs after the dialog closes.
+
+### Example: settings saved notification
+
+```go
+showAlert := gova.UseAlert(s)
+
+gova.Button("Save", func() {
+    saveSettings()
+    showAlert("Saved", "Your settings have been saved.",
+        gova.AlertAction{Label: "OK", Style: gova.ActionDefault},
+    )
+})
+```
+
+## Sheets
+
+```go
+func UseSheet(s *Scope) (show func(content View), dismiss func())
+```
+
+`UseSheet` returns a pair of functions. Call `show` with any `View` to present it as an overlay above the main content. Call `dismiss` to close it programmatically.
+
+Only one sheet is active at a time. Calling `show` while a sheet is already visible replaces it. Calling `dismiss` when no sheet is open is a no-op.
+
+```go
+func (v SettingsView) Body(s *gova.Scope) gova.View {
+    showSheet, dismissSheet := gova.UseSheet(s)
+
+    return gova.Button("Settings", func() {
+        showSheet(gova.VStack(
+            gova.Text("App Settings").Font(gova.Title).Bold(),
+            gova.Divider(),
+            gova.Text("More options here..."),
+            gova.Spacer(),
+            gova.Button("Close", func() { dismissSheet() }),
+        ).Padding(gova.SpaceLG))
+    })
+}
+```
+
+### Dismiss lifecycle
+
+The `dismiss` function returned by `UseSheet` is safe to call from any goroutine. Internally it holds a mutex around the cancellation token, so concurrent calls are harmless. When the user closes the sheet via any path (e.g. a built-in close button), the dismiss token is cleared automatically, so a later programmatic call to `dismiss` is a no-op rather than an error.
+
+### Pattern: settings sheet
+
+A common pattern is to open a full-featured settings panel as a sheet so the user can adjust options without leaving the current screen:
+
+```go
+func (v AppToolbar) Body(s *gova.Scope) gova.View {
+    showSheet, dismissSheet := gova.UseSheet(s)
+
+    openSettings := func() {
+        showSheet(SettingsPanel{OnDone: func() { dismissSheet() }})
+    }
+
+    return gova.HStack(
+        gova.Spacer(),
+        gova.Button("Settings", openSettings),
+    )
+}
+```
+
+## Changing the app theme at runtime
+
+```go
+func UseSetTheme(s *Scope) func(*Theme)
+```
+
+`UseSetTheme` returns a function that swaps the running app's theme. Call it from any event handler — for example, a dark-mode toggle in a settings sheet:
+
+```go
+func (v ThemeToggle) Body(s *gova.Scope) gova.View {
+    setTheme := gova.UseSetTheme(s)
+
+    return gova.Button("Switch to dark mode", func() {
+        setTheme(gova.DarkTheme())
+    })
+}
+```

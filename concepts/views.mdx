@@ -1,0 +1,128 @@
+---
+title: "Gova views and the view tree: how UI rendering works"
+description: "Understand how Gova's View interface, view nodes, and the reconciler work together to render and update the native widget tree efficiently."
+---
+
+Every piece of UI in Gova is a `View`. Widget constructors, layout functions, and component `Body` methods all produce `View` values that form a tree. Gova walks that tree on every render, compares it against the previous one, and applies only the changes that are needed to update the underlying native widgets. Understanding views as lightweight descriptors — not live objects — is the key mental model for writing correct, efficient Gova code.
+
+## The View interface
+
+```go
+type View interface {
+    viewNode() *viewNode
+}
+```
+
+The interface is deliberately minimal and unexported at the method level. You never implement `View` yourself; every value that satisfies it comes from a Gova constructor or from a component's `Body` return. The concrete backing type is `*viewNode`, an internal tagged union that carries data for whichever widget kind it represents.
+
+## View kinds
+
+Each constructor returns a `*viewNode` tagged with a specific kind. The full set of kinds in the framework:
+
+| Constructor | Kind |
+|---|---|
+| `Text(...)` | `viewKindText` |
+| `Button(...)` | `viewKindButton` |
+| `VStack(...)` | `viewKindVStack` |
+| `HStack(...)` | `viewKindHStack` |
+| `ZStack(...)` | `viewKindZStack` |
+| `Group(...)` | `viewKindGroup` |
+| `Spacer()` | `viewKindSpacer` |
+| `TextField(...)` | `viewKindTextField` |
+| `Toggle(...)` | `viewKindToggle` |
+| `Slider(...)` | `viewKindSlider` |
+| `Picker(...)` | `viewKindPicker` |
+| `ProgressBar(...)` / `ProgressView()` | `viewKindProgress` |
+| `List(...)` | `viewKindList` |
+| `Grid(...)` | `viewKindGrid` |
+| `Form(...)` | `viewKindForm` |
+| `ScrollView(...)` | `viewKindScrollView` |
+| `Scaffold(...)` | `viewKindScaffold` |
+| `TabView(...)` | `viewKindTabView` |
+| `Image(...)` | `viewKindImage` |
+| `NavStack(...)` | `viewKindNavStack` |
+
+## Views are descriptors, not live objects
+
+Each call to `Body` (or `Define`) produces a fresh view tree from scratch. Nodes are cheap to allocate; they carry only configuration data (strings, numbers, callbacks) and child pointers. They hold no native widget handles and own no OS resources.
+
+The reconciler receives the new tree and the previous tree. It walks them in parallel, and for each node it:
+
+1. Checks whether the kind changed. If so, it replaces the widget entirely.
+2. Checks whether the data changed. If so, it patches only the fields that differ.
+3. Recurses into children, matching them by position or by `Key`.
+
+The result is that only changed native widgets are touched, keeping updates efficient even for large trees.
+
+## Modifier chains
+
+Every `*viewNode` exposes chainable modifier methods that configure its appearance and behaviour. Each method mutates the node in place and returns the receiver, making chains natural:
+
+```go
+gova.Text("Hello, world").
+    Font(gova.Title).
+    Bold().
+    Color(gova.Accent).
+    Padding(gova.SpaceMD)
+```
+
+Common modifiers:
+
+| Method | Effect |
+|---|---|
+| `.Padding(v)` | Uniform padding on all sides |
+| `.PaddingEdges(t, r, b, l)` | Per-edge padding |
+| `.Font(style)` | Named font style (`Body`, `Title`, `Caption`, `Mono`, …) |
+| `.Bold()` | Bold weight |
+| `.Italic()` | Italic style |
+| `.Color(c)` | Foreground color (static or theme-resolved) |
+| `.Background(c)` | Background fill |
+| `.Disabled(d)` | Enable/disable interactivity |
+| `.Opacity(o)` | Alpha (0.0–1.0) |
+| `.Frame(w, h)` | Preferred size |
+| `.Grow()` | Expand to fill available space on the stack axis |
+| `.CornerRadius(r)` | Round corners |
+| `.Shadow(c, r, x, y)` | Drop shadow |
+| `.Stroke(c, w)` | Colored border |
+| `.OnTap(fn)` | Tap handler (not valid on `Button`) |
+
+Because modifiers mutate the node rather than copy it, do not share a `*viewNode` between two parts of the tree — always call the constructor again to produce a fresh node.
+
+## Stable identity with Key
+
+When items in a list can reorder, Gova needs a stable identifier to match old nodes to new ones. Without a key, the reconciler falls back to positional matching: item at index 0 maps to the previous item at index 0. If item order changes, that produces spurious widget replacements and destroys state that was associated with the old positions.
+
+Attach a key to any node with `.Key`:
+
+```go
+func (n *viewNode) Key(k any) *viewNode
+```
+
+```go
+gova.List(usersState,
+    func(u User) int { return u.ID },
+    func(i int, u User) gova.View {
+        return UserRow{User: u}
+    },
+)
+```
+
+`List`, `ListOf`, and `ForEach` set keys automatically when you supply an ID function. Call `.Key` manually only when building custom list-like structures.
+
+## Passing views and viewables to constructors
+
+Layout constructors accept `any` so they can take three shapes:
+
+- A `View` value — the usual case: any `*viewNode` or component result.
+- A `Viewable` — a struct with a `Body` method, passed without wrapping.
+- `nil` — silently dropped, useful for conditional children.
+
+Anything else causes a panic with a descriptive message at the call site.
+
+```go
+gova.VStack(
+    Header{Title: "Users"},                       // Viewable
+    gova.Divider(),                               // View
+    gova.Show(isLoading, gova.ProgressView()),    // dropped when isLoading is false
+)
+```

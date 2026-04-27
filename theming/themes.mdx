@@ -1,0 +1,194 @@
+---
+title: "Theming Gova apps with dark, light, and custom palettes"
+description: "Configure dark or light mode, set a custom accent color, and override semantic color tokens at startup or at runtime using the Theme and SetTheme API."
+---
+
+Gova's theming system lets you set a dark or light color scheme, pick a custom
+accent, and override any individual semantic color token — all from a single
+`Theme` value you pass at startup or swap at runtime without restarting the app.
+
+## The `Theme` struct
+
+```go
+type Theme struct {
+    Variant ThemeVariant
+    Accent  color.Color
+    Colors  map[ThemeColorName]color.Color
+}
+```
+
+- `Variant` controls the overall light/dark/system palette.
+- `Accent` overrides the accent color used for interactive elements.
+- `Colors` is an optional map of semantic token overrides. Tokens not in the
+  map fall back to Gova's built-in defaults for the active variant.
+
+## Theme variants
+
+```go
+type ThemeVariant int
+
+const (
+    ThemeLight  ThemeVariant = iota // light palette
+    ThemeDark                       // dark palette
+    ThemeSystem                     // follow the OS setting
+)
+```
+
+Use `ThemeSystem` to respect the user's OS-level dark/light preference.
+
+## Constructors
+
+Three helpers create a `*Theme` with sensible defaults and an empty color
+override map ready for customization:
+
+```go
+func LightTheme() *Theme
+func DarkTheme() *Theme
+func SystemTheme() *Theme
+```
+
+Both accept fluent methods for customization:
+
+```go
+func (t *Theme) WithAccent(c color.Color) *Theme
+func (t *Theme) SetColor(name ThemeColorName, c color.Color) *Theme
+```
+
+`WithAccent` and `SetColor` both return `t`, so you can chain calls:
+
+```go
+theme := gova.DarkTheme().
+    WithAccent(gova.Hex("#BF5AF2")).
+    SetColor(gova.ColorSurface, gova.Hex("#1C1C1E"))
+```
+
+## Setting the theme at startup
+
+Pass the theme through `AppConfig.Theme`:
+
+```go
+g.RunWithConfig(g.AppConfig{
+    Title:  "Themed App",
+    Width:  500,
+    Height: 700,
+    Theme:  g.DarkTheme().WithAccent(g.Purple),
+}, App)
+```
+
+If `AppConfig.Theme` is `nil`, Gova uses the Fyne default theme.
+
+## Changing the theme at runtime
+
+`UseSetTheme` returns a function that swaps the active theme from any event
+handler. The change applies on the UI goroutine and every semantic color
+resolves against the new palette on the next render.
+
+```go
+func UseSetTheme(s *Scope) func(*Theme)
+```
+
+```go
+func (v Settings) Body(s *gova.Scope) gova.View {
+    setTheme := gova.UseSetTheme(s)
+
+    return gova.VStack(
+        gova.Button("Light", func() { setTheme(gova.LightTheme()) }),
+        gova.Button("Dark",  func() { setTheme(gova.DarkTheme()) }),
+        gova.Button("System", func() { setTheme(gova.SystemTheme()) }),
+    ).Spacing(gova.SpaceSM)
+}
+```
+
+The themed example app toggles dark mode via a `Toggle` widget and a custom
+accent color:
+
+```go
+g.Toggle(isDark.Get()).OnChange(func(dark bool) {
+    isDark.Set(dark)
+    if dark {
+        setTheme(g.DarkTheme().WithAccent(g.Purple))
+    } else {
+        setTheme(g.LightTheme().WithAccent(g.Purple))
+    }
+})
+```
+
+## Semantic color tokens
+
+`ThemeColorName` constants are the keys you can override in `Theme.Colors`.
+Each token maps to a semantic role in the UI:
+
+| Token | Role |
+|---|---|
+| `ColorPrimary` | Primary text and foreground elements |
+| `ColorForeground` | General foreground (alias of `ColorPrimary`) |
+| `ColorSecondary` | Secondary / subdued text |
+| `ColorBackground` | Window and page background |
+| `ColorSurface` | Card and panel surfaces |
+| `ColorAccent` | Interactive highlights and selections |
+| `ColorButton` | Button fill color |
+| `ColorBorder` | Dividers and input borders |
+| `ColorInputBackground` | Text field background |
+| `ColorInputBorder` | Text field border |
+| `ColorError` | Destructive actions and error states |
+| `ColorSuccess` | Confirmation and success states |
+| `ColorWarning` | Warning indicators |
+| `ColorDisabled` | Disabled control foreground |
+| `ColorFocus` | Keyboard focus ring |
+| `ColorSelection` | Selected text highlight |
+| `ColorHover` | Hover state overlay |
+
+When a token has no entry in `Theme.Colors`, the renderer falls back to
+Gova's built-in defaults, which differ between light and dark variants.
+
+## Semantic color variables
+
+Gova exports pre-built `color.Color` values that resolve against the active
+theme at render time. Use them wherever a modifier accepts a color:
+
+```go
+gova.Text("Hello").Color(gova.Primary)
+gova.Text("Subdued").Color(gova.Secondary)
+gova.Text("Danger").Color(gova.Destructive)
+gova.Text("OK").Color(gova.Success)
+gova.Text("Note").Color(gova.Warning)
+```
+
+| Variable | Resolves to |
+|---|---|
+| `Primary` | `ColorForeground` |
+| `Secondary` | `ColorSecondary` |
+| `Background` | `ColorBackground` |
+| `Surface` | `ColorSurface` |
+| `Accent` | `ColorAccent` |
+| `Destructive` | `ColorError` |
+| `Success` | `ColorSuccess` |
+| `Warning` | `ColorWarning` |
+| `BorderColor` | `ColorBorder` |
+
+## Custom accent color
+
+Set `Accent` on the theme or call `WithAccent` on a constructor:
+
+```go
+theme := gova.LightTheme().WithAccent(gova.Hex("#FF3B30"))
+```
+
+The `Hex` helper parses 6- or 8-character hex strings (with or without a
+leading `#`). The 8-character form includes an alpha channel.
+
+## Color utilities
+
+`FadeColor` multiplies a color's alpha channel by a factor in `[0, 1]`,
+useful for fade animations:
+
+```go
+faded := gova.FadeColor(gova.Accent, 0.5) // 50% opacity
+```
+
+`MixColor` linearly interpolates between two colors, useful for animated
+transitions:
+
+```go
+mixed := gova.MixColor(gova.Primary, gova.Secondary, 0.3)
+```

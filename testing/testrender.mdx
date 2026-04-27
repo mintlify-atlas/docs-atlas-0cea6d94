@@ -1,0 +1,247 @@
+---
+title: "Testing Gova components headlessly with TestRender"
+description: "TestRender renders a Gova component tree without opening a window, letting you query the view tree, assert on content, and simulate user interactions."
+---
+
+`TestRender` mounts a Gova component without opening a Fyne window. It resolves
+nested components—including `Define` closures and `Viewable` types—and returns a
+`*RenderedTree` you can query and interact with in ordinary `go test` tests.
+No display server, no GUI toolkit initialization, no side effects outside the
+process.
+
+```go
+func TestRender(root View, opts ...TestOption) *RenderedTree
+```
+
+## Basic usage
+
+Pass any `View`—typically a component created with `Define` or a `Viewable`
+struct—to `TestRender`:
+
+```go
+func TestCounterInitialState(t *testing.T) {
+    counter := gova.Define(func(s *gova.Scope) gova.View {
+        count := gova.State(s, 0)
+        return gova.VStack(
+            gova.Text(count.Format("Count: %d")),
+            gova.Button("+", func() {
+                count.Update(func(n int) int { return n + 1 })
+            }),
+            gova.Button("-", func() {
+                count.Update(func(n int) int { return n - 1 })
+            }),
+        )
+    })
+
+    tree := gova.TestRender(counter)
+
+    txt := tree.FindText(0)
+    if !txt.Exists() {
+        t.Fatal("expected a text node")
+    }
+    if txt.Value != "Count: 0" {
+        t.Fatalf("expected 'Count: 0', got %q", txt.Value)
+    }
+}
+```
+
+## Simulating interactions
+
+Result types carry enough context to simulate common interactions. Every
+interaction automatically calls `Rerender` so subsequent queries reflect the
+new state.
+
+### Click a button
+
+`FindButton(n)` returns the nth button (zero-indexed, depth-first). `Click`
+calls the handler and rerenders.
+
+```go
+func TestCounterIncrement(t *testing.T) {
+    counter := gova.Define(func(s *gova.Scope) gova.View {
+        count := gova.State(s, 0)
+        return gova.VStack(
+            gova.Text(count.Format("Count: %d")),
+            gova.Button("+", func() {
+                count.Update(func(n int) int { return n + 1 })
+            }),
+        )
+    })
+
+    tree := gova.TestRender(counter)
+
+    tree.FindButton(0).Click()
+    if tree.FindText(0).Value != "Count: 1" {
+        t.Fatalf("expected 'Count: 1', got %q", tree.FindText(0).Value)
+    }
+}
+```
+
+Use `FindButtonByLabel` when you know the label text and don't want to rely on
+position:
+
+```go
+tree.FindButtonByLabel("Save").Click()
+```
+
+### Toggle a checkbox
+
+`FindToggle(n)` returns the nth toggle. `Toggle` flips the current value and
+invokes the `OnChange` handler.
+
+```go
+func TestFeatureFlag(t *testing.T) {
+    app := gova.Define(func(s *gova.Scope) gova.View {
+        enabled := gova.State(s, false)
+        return gova.VStack(
+            gova.Toggle(enabled.Get()).Label("Feature").OnChange(func(v bool) {
+                enabled.Set(v)
+            }),
+            gova.When(enabled.Get(), func() gova.View {
+                return gova.Text("ON")
+            }),
+        )
+    })
+
+    tree := gova.TestRender(app)
+
+    if tree.NodeCount("Text") != 0 {
+        t.Fatal("expected no text when toggle is off")
+    }
+
+    tree.FindToggle(0).Toggle()
+
+    if tree.FindText(0).Value != "ON" {
+        t.Fatalf("expected 'ON', got %q", tree.FindText(0).Value)
+    }
+}
+```
+
+### Type into a text field
+
+`FindTextField(n)` returns the nth text field. `Type` sets the bound
+`*StateValue[string]` and rerenders. `Submit` rerenders without changing the
+value, useful for components that react to an explicit submit action.
+
+```go
+func TestGreeting(t *testing.T) {
+    app := gova.Define(func(s *gova.Scope) gova.View {
+        input := gova.State(s, "")
+        return gova.VStack(
+            gova.TextField(input).Placeholder("Enter name"),
+            gova.Text(input.Format("Hello, %s")),
+        )
+    })
+
+    tree := gova.TestRender(app)
+
+    tf := tree.FindTextField(0)
+    if tf.Placeholder != "Enter name" {
+        t.Fatalf("unexpected placeholder: %q", tf.Placeholder)
+    }
+
+    tf.Type("Alice")
+    if tree.FindText(0).Value != "Hello, Alice" {
+        t.Fatalf("expected 'Hello, Alice', got %q", tree.FindText(0).Value)
+    }
+}
+```
+
+## Query reference
+
+All `FindX` methods walk the tree depth-first and are zero-indexed.
+
+| Method | Returns | Key fields |
+|---|---|---|
+| `FindText(n int)` | `TextResult` | `.Value string` |
+| `FindButton(n int)` | `ButtonResult` | `.Label string` |
+| `FindButtonByLabel(label string)` | `ButtonResult` | `.Label string` |
+| `FindToggle(n int)` | `ToggleResult` | `.Label string`, `.Checked bool` |
+| `FindTextField(n int)` | `TextFieldResult` | `.Placeholder string` |
+| `NodeCount(kind string)` | `int` | — |
+
+Every result type has an `Exists() bool` method. Check it before accessing
+fields when the node's presence is part of what you're asserting:
+
+```go
+btn := tree.FindButtonByLabel("Delete")
+if btn.Exists() {
+    t.Fatal("Delete button should not be present")
+}
+```
+
+`NodeCount` accepts the following kind strings: `"Text"`, `"Button"`,
+`"VStack"`, `"HStack"`, `"TextField"`, `"Toggle"`, `"List"`, `"Spacer"`,
+`"Divider"`.
+
+## Test options
+
+### WithStore
+
+Pre-provide a store value on the test scope so components that call `UseStore`
+receive a known initial value:
+
+```go
+func WithStore[T any](key *StoreKey[T], value T) TestOption
+```
+
+```go
+func TestNotesView(t *testing.T) {
+    tree := gova.TestRender(NotesView{},
+        gova.WithStore(NotesStore, NotesModel{
+            Notes: []Note{{ID: 1, Title: "example"}},
+        }),
+    )
+
+    if tree.FindText(0).Value != "example" {
+        t.Fatalf("unexpected title: %q", tree.FindText(0).Value)
+    }
+}
+```
+
+Multiple `WithStore` calls can be combined in a single `TestRender`:
+
+```go
+tree := gova.TestRender(root,
+    gova.WithStore(UserStore, User{Name: "Alice"}),
+    gova.WithStore(ThemeStore, gova.DarkTheme()),
+)
+```
+
+## Manual rerender
+
+`Rerender` forces a render pass without simulating an interaction. Use it when
+state is mutated by code outside the tree:
+
+```go
+someState.Set("updated")
+tree.Rerender()
+```
+
+`Click`, `Toggle`, and `Type` all call `Rerender` automatically, so you
+rarely need this directly.
+
+## Nested components
+
+`TestRender` resolves nested components fully. A component that renders another
+component works without any extra setup:
+
+```go
+func TestNestedComponent(t *testing.T) {
+    inner := gova.Define(func(s *gova.Scope) gova.View {
+        return gova.Text("nested")
+    })
+    outer := gova.Define(func(s *gova.Scope) gova.View {
+        return gova.VStack(gova.Text("outer"), inner)
+    })
+
+    tree := gova.TestRender(outer)
+
+    if tree.NodeCount("Text") != 2 {
+        t.Fatalf("expected 2 text nodes, got %d", tree.NodeCount("Text"))
+    }
+    if tree.FindText(1).Value != "nested" {
+        t.Fatalf("expected 'nested', got %q", tree.FindText(1).Value)
+    }
+}
+```

@@ -1,0 +1,176 @@
+---
+title: "Dynamic lists and grids in Gova"
+description: "List renders large dynamic item counts efficiently with a count and render function. Grid arranges items in a fixed column count. Both work with State."
+---
+
+Gova provides several primitives for rendering collections. Use `List` and `ListOf` for state-driven reactive collections, `ForEach` / `ForEachIndexed` for plain slices, and `Grid` when you need a fixed-column tile layout.
+
+## List
+
+```go
+func List[T any, K comparable](
+    state *StateValue[[]T],
+    keyFn  func(T) K,
+    renderFn func(int, T) View,
+) *viewNode
+```
+
+`List` reads a slice from a `StateValue` and calls `renderFn(i, item)` for each element. The `keyFn` produces a stable comparable key for each item so the reconciler can diff moves and removals without re-rendering unchanged rows.
+
+```go
+gova.List(todos,
+    func(t Todo) int { return t.ID },
+    func(i int, todo Todo) gova.View {
+        return TodoRow{Todo: todo}
+    },
+)
+```
+
+When the underlying state changes, only rows whose key has changed are re-rendered.
+
+### Key stability
+
+Call `.Key(k any)` on a row view to assert a stable identity when items can reorder:
+
+```go
+func(i int, note Note) gova.View {
+    return NoteRow{Note: note}.viewNode().Key(note.ID)
+}
+```
+
+## ListOf
+
+```go
+func ListOf[T any](state *StateValue[[]T], renderFn func(T) any) *viewNode
+```
+
+`ListOf` infers the key automatically. Resolution order:
+
+1. `T` (or `*T`) has an `ID() K` method — the method is called.
+2. `T` is a struct with a field tagged `` `gova:"id"` `` — that field is used.
+3. `T` is a struct with an exported `ID` field — that field is used.
+4. Fall back to slice index. This is less robust under reordering; use `List` with an explicit key function when order can change.
+
+```go
+type Note struct {
+    ID    int
+    Title string
+    Body  string
+}
+
+gova.ListOf(notes, func(n Note) any {
+    return NoteRow{Note: n}
+})
+```
+
+Accessor resolution is cached per element type, so the reflection cost is paid once per process.
+
+## ForEach and ForEachIndexed
+
+```go
+func ForEach[T any](items []T, renderFn func(T) any) *viewNode
+func ForEachIndexed[T any](items []T, renderFn func(int, T) any) *viewNode
+```
+
+Use these when the slice does not come from a `StateValue`. The result is a flat `Group` node that drops into any parent layout. There is no diffing — all rows are rebuilt on each render.
+
+```go
+gova.VStack(
+    gova.Text("Pinned").Font(gova.Caption).Color(gova.Secondary),
+    gova.ForEach(pinnedNotes, func(n Note) any {
+        return NoteRow{Note: n}
+    }),
+)
+```
+
+## Grid
+
+```go
+func Grid(columns int, children ...any) *viewNode
+```
+
+`Grid` arranges children in a fixed number of columns, filling rows left-to-right. Each cell takes an equal share of the available width. Trailing cells in the last row are left empty if the item count is not a multiple of `columns`.
+
+```go
+gova.Grid(3,
+    tile1, tile2, tile3,
+    tile4, tile5,         // last row: col 3 is empty
+)
+```
+
+Pass items from a state-driven list with `ForEach`:
+
+```go
+gova.Grid(2,
+    gova.ForEach(photos, func(p Photo) any {
+        return PhotoTile{Photo: p}
+    }),
+)
+```
+
+## DerivedList
+
+When a state holds a struct that contains a slice, use `DerivedList` to produce a `*StateValue[[]T]` suitable for `List` or `ListOf`:
+
+```go
+todos := gova.DerivedList(model, func(m AppModel) []Todo { return m.Todos })
+
+gova.ListOf(todos, func(t Todo) any {
+    return TodoRow{Todo: t}
+})
+```
+
+## Conditional rows
+
+Use `When` or `Show` inside a render function to conditionally include rows:
+
+```go
+gova.List(items,
+    func(item Item) int { return item.ID },
+    func(i int, item Item) gova.View {
+        return gova.VStack(
+            ItemRow{Item: item},
+            gova.When(item.HasNote, func() gova.View {
+                return gova.Text(item.Note).
+                    Font(gova.Caption).
+                    Color(gova.Secondary).
+                    PaddingLeading(gova.SpaceLG)
+            }),
+        ).Spacing(gova.SpaceXS)
+    },
+)
+```
+
+## Full example: todos
+
+```go
+func TodoList(s *gova.Scope) gova.View {
+    todos  := gova.State(s, []Todo{})
+    input  := gova.State(s, "")
+
+    onAdd := func() {
+        text := input.Get()
+        if text == "" {
+            return
+        }
+        todos.Set(append(todos.Get(), Todo{ID: nextID(), Title: text}))
+        input.Set("")
+    }
+
+    return gova.Scaffold(
+        gova.ScrollView(
+            gova.ListOf(todos, func(t Todo) any {
+                return TodoRow{Todo: t, Todos: todos}
+            }),
+        ),
+    ).Bottom(
+        gova.HStack(
+            gova.TextField(input).
+                Placeholder("New todo…").
+                OnSubmit(func(_ string) { onAdd() }).
+                Grow(),
+            gova.Button("Add", onAdd),
+        ).Padding(gova.SpaceSM),
+    )
+}
+```

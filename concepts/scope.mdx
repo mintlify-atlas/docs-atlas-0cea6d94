@@ -1,0 +1,123 @@
+---
+title: "The Scope: Gova's per-component lifecycle container"
+description: "The *Scope is Gova's per-component lifecycle context. It holds state, refs, effects, and stores, and cancels them all when the component unmounts."
+---
+
+Every component in Gova receives a `*Scope` as the first argument to its `Body` method (or its `Define` closure). The scope is the component's handle on everything that outlives a single render: reactive state, non-reactive refs, effect registrations, provided stores, and a `context.Context` tied to the component's lifetime. When the component unmounts, the framework destroys the scope — running effect cleanups, cancelling the context, and releasing all associated memory.
+
+## What the scope holds
+
+```
+*Scope
+├── states     map[string]*StateValue[T]   — reactive state, keyed by call site
+├── refs       map[string]*RefValue[T]     — non-reactive refs, keyed by call site
+├── stores     map[any]any                 — provided stores, walked up the tree
+├── ctx        context.Context             — cancelled on unmount
+└── childScopes map[string]*Scope         — one entry per nested component
+```
+
+You never construct a `*Scope` yourself. The framework creates one per component and passes it in at each render.
+
+## context.Context
+
+The only exported method on `*Scope` is `Context`:
+
+```go
+func (s *Scope) Context() context.Context
+```
+
+The returned context is cancelled when the component unmounts. Pass it to goroutines started from event handlers or effects so that work is cleaned up automatically:
+
+```go
+func (v Fetcher) Body(s *gova.Scope) gova.View {
+    data := gova.State[[]Item](s, nil)
+
+    gova.UseEffect(s, func(ctx context.Context) func() {
+        go func() {
+            items, err := fetchItems(ctx)
+            if err == nil {
+                data.Set(items)
+            }
+        }()
+        return nil
+    })
+
+    // ...
+}
+```
+
+## State and call-site identity
+
+`State` and `Ref` use `runtime.Caller` to determine their key automatically:
+
+```go
+func State[T any](s *Scope, initial T) *StateValue[T]
+func Ref[T any](s *Scope, initial T) *RefValue[T]
+```
+
+The key is the `file:line` string of the `State` (or `Ref`) call in your source. On the first render the value is initialised to `initial`; on every subsequent render the same `*StateValue` is returned with its current value intact.
+
+```go
+func (v Counter) Body(s *gova.Scope) gova.View {
+    count := gova.State(s, 0)  // key: "counter.go:12" (or wherever this line sits)
+
+    return gova.VStack(
+        gova.Text(count.Format("count: %d")),
+        gova.Button("+1", func() {
+            count.Update(func(n int) int { return n + 1 })
+        }),
+    )
+}
+```
+
+### Do not call State conditionally
+
+Because the key is derived from the call site, every call to `State` must be reached on every render. If you call `State` inside an `if` branch or a loop, the key position shifts between renders and the framework either returns stale state or panics.
+
+```go
+// WRONG — count is only created when logged in
+if user.LoggedIn {
+    count := gova.State(s, 0)
+}
+
+// CORRECT — always call State at the top level
+count := gova.State(s, 0)
+```
+
+When you genuinely need dynamic keys — for example, state allocated inside a loop — use `StateKey` instead:
+
+```go
+func StateKey[T any](s *Scope, key string, initial T) *StateValue[T]
+```
+
+## Scope validity
+
+The `*Scope` passed to `Body` is only valid for the duration of that call. Do not store the pointer in a struct field, a closure variable, or any other location that outlives `Body`:
+
+```go
+// WRONG — capturing s outside of Body
+type Bad struct{ scope *gova.Scope }
+func (v Bad) Body(s *gova.Scope) gova.View {
+    v.scope = s  // don't do this
+    return gova.Text("bad")
+}
+```
+
+State values and ref values returned by `State` and `Ref` are safe to hold onto — they are heap-allocated and survive across renders. The scope pointer itself is not.
+
+## Child scopes and the scope hierarchy
+
+Each nested component gets its own child scope. The framework creates it on first render, keyed by the component's position in its parent's child list (or by its `.Key()` value if one is set). Sibling components of the same type hold independent state because they occupy different slots and therefore get different child scopes.
+
+```
+App scope
+├── Sidebar scope     (slot "0")
+│   └── NavRow scope  (slot "0")
+│   └── NavRow scope  (slot "1")
+└── Content scope     (slot "1")
+    └── UserCard scope (slot "0")
+```
+
+The hierarchy mirrors the component tree. Provided stores (`gova.Provide`) are visible to all descendants: `lookupStore` walks up the parent chain until it finds a matching key or reaches the root.
+
+When a component unmounts, its scope and all child scopes are destroyed recursively — effect cleanups run bottom-up through the subtree before the context cancellation fires.

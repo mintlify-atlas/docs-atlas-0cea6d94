@@ -1,0 +1,214 @@
+---
+title: "Modifier chains for styling Gova views"
+description: "Gova modifiers let you style any view with method chains — padding, frame size, colors, typography, borders, opacity, and accessibility labels."
+---
+
+Every widget constructor returns a `*viewNode`. Modifiers are methods on that pointer that mutate it in place and return the same pointer, enabling fluent chains. Modifier order does not affect the final result — all modifiers are collected first and applied at render time with fixed semantics.
+
+```go
+gova.Text("Welcome").
+    Font(gova.Title).
+    Bold().
+    Color(gova.Accent).
+    Padding(gova.SpaceMD)
+```
+
+## Padding
+
+Padding adds space between the view's content and its outer edge.
+
+```go
+func (n *viewNode) Padding(all float32) *viewNode
+func (n *viewNode) PaddingEdges(top, right, bottom, left float32) *viewNode
+func (n *viewNode) PaddingH(v float32) *viewNode
+func (n *viewNode) PaddingV(v float32) *viewNode
+func (n *viewNode) PaddingTop(v float32) *viewNode
+func (n *viewNode) PaddingBottom(v float32) *viewNode
+func (n *viewNode) PaddingLeading(v float32) *viewNode
+func (n *viewNode) PaddingTrailing(v float32) *viewNode
+```
+
+`Padding(all)` applies the same inset on all four edges. The per-edge helpers merge rather than replace — calling `PaddingH(16).PaddingTop(8)` yields 8 px on top, 16 px on the sides, and 0 px on the bottom.
+
+```go
+gova.VStack(
+    gova.Text("Body text"),
+).PaddingH(gova.SpaceLG).PaddingV(gova.SpaceMD)
+```
+
+## Spacing tokens
+
+Use spacing tokens instead of hard-coded pixel values:
+
+| Token | Value |
+|-------|-------|
+| `SpaceXS` | 4 px |
+| `SpaceSM` | 8 px |
+| `SpaceMD` | 16 px |
+| `SpaceLG` | 24 px |
+| `SpaceXL` | 32 px |
+
+## Frame
+
+Frame modifiers constrain the size of a view.
+
+```go
+func (n *viewNode) Frame(width, height float32) *viewNode
+func (n *viewNode) MinWidth(w float32) *viewNode
+func (n *viewNode) MinHeight(h float32) *viewNode
+func (n *viewNode) Grow() *viewNode
+```
+
+`Frame(width, height)` sets a preferred minimum size; pass `0` to leave an axis unconstrained. `Grow()` marks a child to fill remaining space inside an `HStack` or `VStack` — only the first grow child in a stack participates.
+
+```go
+gova.Image("avatar.png").Frame(48, 48).CornerRadius(24)
+
+gova.TextField(input).MinHeight(36).Grow()
+```
+
+## Colors
+
+Both static and semantic (theme-adaptive) colors are accepted wherever a color is expected.
+
+```go
+func (n *viewNode) Color(c any) *viewNode
+func (n *viewNode) Background(c any) *viewNode
+```
+
+**Static colors** — fixed RGBA, do not adapt to theme:
+
+| Variable | Value |
+|----------|-------|
+| `Red` | `#FF3B30` |
+| `Blue` | `#007AFF` |
+| `Green` | `#34C759` |
+| `Orange` | `#FF9500` |
+| `Purple` | `#AF52DE` |
+| `Gray` | `#8E8E93` |
+| `White` | `#FFFFFF` |
+| `Black` | `#000000` |
+
+**Semantic colors** — resolved against the active theme at render time:
+
+| Variable | Resolves to |
+|----------|-------------|
+| `Primary` | Main foreground text color |
+| `Secondary` | Dimmed secondary text |
+| `Background` | Window / page background |
+| `Surface` | Card / panel background |
+| `Accent` | Brand highlight color |
+| `Destructive` | Error / delete actions |
+| `Success` | Positive confirmations |
+| `Warning` | Caution indicators |
+| `BorderColor` | Dividers and stroke lines |
+
+You can also use `gova.Hex("#1A1A2E")` to create a color from a hex string, or call `gova.FadeColor(base, alpha)` and `gova.MixColor(a, b, t)` for animation-friendly color blending.
+
+```go
+gova.Text("Error").Color(gova.Destructive)
+gova.VStack(...).Background(gova.Surface).Stroke(gova.BorderColor, 1)
+```
+
+## Typography
+
+```go
+func (n *viewNode) Font(style FontStyle) *viewNode
+func (n *viewNode) Bold() *viewNode
+func (n *viewNode) Italic() *viewNode
+func (n *viewNode) Strikethrough(on bool) *viewNode
+```
+
+Available font styles:
+
+| Constant | Use |
+|----------|-----|
+| `Body` | Default body text |
+| `Title` | Large screen title |
+| `Title2` | Second-level heading |
+| `Title3` | Third-level heading |
+| `Caption` | Small descriptive text |
+| `Mono` | Code or monospaced text |
+
+```go
+gova.Text("Welcome").Font(gova.Title).Bold()
+gova.Text("Details").Font(gova.Caption).Color(gova.Secondary).Italic()
+gova.Text("$ ls -la").Font(gova.Mono)
+gova.Text("Removed").Strikethrough(true).Color(gova.Secondary)
+```
+
+## Visual effects
+
+```go
+func (n *viewNode) CornerRadius(r float32) *viewNode
+func (n *viewNode) Opacity(o float64) *viewNode
+func (n *viewNode) Stroke(c any, width float32) *viewNode
+func (n *viewNode) Shadow(c any, radius, offsetX, offsetY float32) *viewNode
+```
+
+`Stroke` draws a colored border around the view's visual box respecting `CornerRadius`. `Shadow` casts a drop shadow. `Opacity` sets the overall transparency (0.0 fully transparent, 1.0 fully opaque).
+
+```go
+gova.VStack(content).
+    Background(gova.Surface).
+    CornerRadius(12).
+    Stroke(gova.BorderColor, 1).
+    Shadow(gova.Black, 8, 0, 2).
+    Padding(gova.SpaceMD)
+```
+
+## Interaction
+
+```go
+func (n *viewNode) OnTap(fn func()) *viewNode
+func (n *viewNode) Disabled(d bool) *viewNode
+```
+
+`OnTap` makes any view tappable. Do not apply it to a `Button` — buttons have their handler in the constructor and `OnTap` will panic on them. `Disabled` prevents interaction and dims the view.
+
+```go
+gova.Image("card.png").
+    OnTap(func() { navigate(card.ID) })
+
+gova.Button("Submit", onSubmit).
+    Disabled(!form.IsValid())
+```
+
+## Accessibility
+
+```go
+func (n *viewNode) AccessibilityLabel(s string) *viewNode
+func (n *viewNode) AccessibilityHint(s string) *viewNode
+func (n *viewNode) AccessibilityRole(r AccessibilityRole) *viewNode
+```
+
+`AccessibilityLabel` is the text read by screen readers in place of the visual content. `AccessibilityHint` provides additional context. `AccessibilityRole` hints the semantic role:
+
+```go
+const (
+    RoleNone
+    RoleButton
+    RoleLink
+    RoleImage
+    RoleHeader
+)
+```
+
+```go
+gova.Image("logo.png").
+    Frame(40, 40).
+    AccessibilityLabel("Company logo").
+    AccessibilityRole(gova.RoleImage)
+```
+
+## Composition rules
+
+The renderer applies modifiers in a fixed semantic order regardless of chain order:
+
+1. **Padding** is applied outside the visual box.
+2. **Background** is painted behind the visual box, inside the padding.
+3. **Stroke** traces the visual box and respects `CornerRadius`.
+4. **Shadow** is cast by the visual box.
+5. **OnTap** wraps the outermost visual to make the whole box tappable.
+
+Nest layouts explicitly when the fixed semantics do not match a particular design requirement.

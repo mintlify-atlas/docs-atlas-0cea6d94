@@ -1,0 +1,174 @@
+---
+title: "Gova CLI: dev hot-reload, build, and run reference"
+description: "The gova CLI wraps the Go toolchain with hot reload via gova dev, static binary compilation via gova build, and one-shot execution via gova run."
+---
+
+`gova` is a small developer tool for Gova applications. It wraps the Go
+toolchain with a hot-reload workflow, a predictable build output location, and
+a convenience run command. It is not required to ship a Gova app—`go build`
+works fine—but it is the fastest way to iterate during development.
+
+## Install
+
+```bash
+go install github.com/nv404/gova/cmd/gova@latest
+```
+
+This places the `gova` binary in `$GOBIN` (typically `~/go/bin`). Make sure
+that directory is on your `PATH`.
+
+## Commands
+
+```text
+gova dev [pkg]      Watch the module and rebuild/restart on change (defaults to .)
+gova build [pkg]    Compile pkg to ./bin/<name>
+gova run [pkg]      Build and run pkg once
+gova version        Print the gova CLI version
+gova help           Show this message
+```
+
+All three build commands accept an optional package path. When omitted, the
+package path defaults to `.` (the current directory).
+
+Arguments after `--` are forwarded verbatim to the compiled binary:
+
+```bash
+gova run ./examples/counter -- --verbose
+gova dev -- --log-level debug
+```
+
+Run `gova <command> --help` to see the flags accepted by a specific subcommand.
+
+---
+
+## gova dev
+
+`gova dev` watches the module root for `.go` source changes, rebuilds the
+binary, and relaunches the child process. It is a kill-and-relaunch workflow:
+each reload is a fresh process, so there is no stale in-memory state between
+saves.
+
+```bash
+gova dev                  # watch current module, run .
+gova dev ./cmd/app        # watch current module, run ./cmd/app
+gova dev -- --flag value  # forward flags to the child binary
+```
+
+### Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--debounce` | `200ms` | Coalesce file-change events within this window before triggering a rebuild |
+| `--state-dir` | `<workdir>/.gova/dev` | Directory where `PersistedState` values are saved across reloads |
+
+### The reload cycle
+
+1. A `.go` file is written or created. Events within the debounce window are
+   coalesced into a single rebuild.
+2. `go build` compiles the package to a temporary binary.
+3. **On success:** the previous child receives `SIGTERM` and has two seconds to
+   exit cleanly before `SIGKILL`. The new binary starts immediately after.
+4. **On build failure:** the running child is left untouched. The compiler error
+   prints to stderr. Fix the issue and save again.
+
+Log output from the child process streams directly to your terminal via the
+same stdin/stdout/stderr as the dev server.
+
+### Preserving state across reloads
+
+In-memory state is reset on every reload. If a piece of state should survive a
+code change, opt in with `PersistedState`. The value round-trips through a JSON
+file in the state directory, which `gova dev` wires up automatically via the
+`$GOVA_DEV_STATE` environment variable.
+
+```go
+// count survives a hot reload; regular State(s, 0) would not.
+count := gova.PersistedState(s, "count", 0)
+```
+
+The child process also receives `GOVA_DEV=1` so application code can branch on
+dev mode if needed.
+
+---
+
+## gova build
+
+`gova build` is a thin wrapper over `go build` that places the output binary
+in a predictable location.
+
+```bash
+gova build              # produces ./bin/<module-name>
+gova build ./cmd/app    # produces ./bin/app
+gova build -o dist/app  # custom output path
+```
+
+### Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `-o` | `./bin/<pkg-basename>` | Output path for the compiled binary |
+
+### Notes
+
+- The output directory (`./bin/` by default) is created on demand.
+- On Windows the binary is automatically suffixed with `.exe`.
+- Build errors stream to stderr exactly as `go build` emits them, so editor
+  integrations that parse compiler output continue to work.
+
+For anything more complex—cross-compilation, build tags, CGo flags—call
+`go build` directly. `gova build` is deliberately thin.
+
+---
+
+## gova run
+
+`gova run` compiles the package to a temporary directory and executes it once.
+It exits with the child process's exit code. There is no watch loop; use
+`gova dev` for that.
+
+```bash
+gova run
+gova run ./cmd/app
+gova run -- --verbose
+```
+
+`gova run` is roughly equivalent to `go run`, but keeps the build and execute
+steps separate. The temporary binary is removed automatically after the process
+exits.
+
+`gova run` has no command-specific flags beyond the shared `[pkg]` and
+`-- child-args...` syntax.
+
+---
+
+## gova version
+
+Prints the CLI version string and exits.
+
+```bash
+$ gova version
+gova 0.1.0
+```
+
+Also accepts `--version` and `-v` as aliases.
+
+## gova help
+
+Prints the top-level usage message and exits. Also accepts `--help` and `-h`.
+
+```bash
+$ gova help
+gova: developer tool for Gova apps
+
+Usage:
+  gova <command> [args]
+
+Commands:
+  dev [pkg]      Watch the module and rebuild/restart on change (defaults to .)
+  build [pkg]    Compile pkg to ./bin/<name>
+  run [pkg]      Build and run pkg once
+  version        Print the gova CLI version
+  help           Show this message
+
+Run "gova <command> --help" for command-specific flags.
+```

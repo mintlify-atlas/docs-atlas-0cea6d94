@@ -1,0 +1,100 @@
+---
+title: "Shared state with Provide and UseStore"
+description: "Stores let a parent component make state available to its entire subtree. Learn how to define StoreKey, Provide at a parent, and UseStore in descendants."
+---
+
+A store is a `*StateValue[T]` that a parent component makes available to every component in its subtree. It removes the need to thread a value through props when many descendants need to read or write the same state.
+
+## Defining a key
+
+A `StoreKey[T]` is the identity token for a store. Define it at package level. The pointer itself is what distinguishes one store from another — two `StoreKey` values with the same `Default` but different allocations are different stores.
+
+```go
+type NotesModel struct {
+    Notes  []Note
+    NextID int
+}
+
+var NotesStore = &gova.StoreKey[NotesModel]{
+    Default: NotesModel{NextID: 1},
+}
+```
+
+`Default` is the value returned by `UseStore` when no ancestor has called `Provide` for the key.
+
+## Providing
+
+```go
+func Provide[T any](s *Scope, key *StoreKey[T], initial T)
+```
+
+`Provide` attaches an initial value for the key to the given scope. Only descendant components — and the providing scope itself — can see it. Call it at the root of the component tree that needs shared access:
+
+```go
+var App = gova.Define(func(s *gova.Scope) gova.View {
+    gova.Provide(s, NotesStore, NotesModel{NextID: 1})
+
+    return gova.TabView(
+        gova.Tab("Notes", "", NotesTab),
+        gova.Tab("Stats", "", StatsTab),
+    )
+})
+```
+
+Calling `Provide` a second time for the same key in a descendant creates a shadow: the descendant's subtree sees the inner store, while siblings and ancestors still see the outer one.
+
+## Reading and writing
+
+```go
+func UseStore[T any](s *Scope, key *StoreKey[T]) *StateValue[T]
+```
+
+`UseStore` walks up the scope tree to find the nearest ancestor that called `Provide` for the key and returns its `*StateValue[T]`. Because all components that call `UseStore` with the same key receive the exact same `*StateValue`, any `Set` or `Update` on it triggers re-renders across every subscribed component.
+
+```go
+var NotesTab = gova.Define(func(s *gova.Scope) gova.View {
+    model := gova.UseStore(s, NotesStore)
+    input := gova.State(s, "")
+
+    add := func() {
+        title := input.Get()
+        if title == "" {
+            return
+        }
+        model.Update(func(m NotesModel) NotesModel {
+            return addNote(m, title)
+        })
+        input.Set("")
+    }
+
+    notes := gova.DerivedList(model, func(m NotesModel) []Note { return m.Notes })
+    count := gova.Derived(model, func(m NotesModel) string {
+        return fmt.Sprintf("%d notes", len(m.Notes))
+    })
+
+    return gova.Scaffold(/* ... */)
+})
+```
+
+A sibling tab can read and write the same store:
+
+```go
+var StatsTab = gova.Define(func(s *gova.Scope) gova.View {
+    model := gova.UseStore(s, NotesStore)
+
+    count := gova.Derived(model, func(m NotesModel) string {
+        return fmt.Sprintf("Total notes: %d", len(m.Notes))
+    })
+
+    return gova.VStack(
+        gova.Text("Statistics").Font(gova.Title).Bold(),
+        gova.Text(count),
+    ).Padding(16)
+})
+```
+
+When `NotesTab` adds a note, `StatsTab` re-renders automatically because both share the same `*StateValue`.
+
+## Fallback behavior
+
+If `UseStore` finds no ancestor `Provide` for the key, it creates a fresh `*StateValue` at the current scope seeded with `StoreKey.Default`. This makes `UseStore` safe to call in isolation (for example in tests or in a standalone component) without an explicit provider.

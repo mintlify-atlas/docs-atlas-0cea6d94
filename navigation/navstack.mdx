@@ -1,0 +1,175 @@
+---
+title: "NavStack: push-pop navigation in Gova"
+description: "NavStack manages a navigation stack of views with push and pop. Use UseNav to get a handle in any descendant, and NavLink for declarative navigation."
+---
+
+`NavStack` gives you a full push-pop navigation model with almost no boilerplate. Wrap your root view in `NavStack`, call `UseNav` anywhere inside the tree to get a typed handle, and push or pop views in response to any event. The stack maintains its own state — no prop-drilling required.
+
+## NavStack
+
+```go
+func NavStack(root any) *viewNode
+```
+
+`NavStack` creates a navigation container rooted at the given view. `root` can be a `View`, a `Viewable` struct, or any value that satisfies the `Viewable` interface. Passing `nil` panics.
+
+```go
+var App = gova.Define(func(s *gova.Scope) gova.View {
+    return gova.NavStack(HomeView{})
+})
+```
+
+The stack owns its own `StateValue[[]View]`. It is not accessible from outside the subtree; descendants access it exclusively through `UseNav`.
+
+`NavStack` automatically renders a title bar above the active view. Each view contributes its title and toolbar buttons via the `.NavTitle` and `.NavToolbar` modifiers (see [Title and toolbar](#title-bar-and-toolbar)).
+
+## UseNav
+
+```go
+func UseNav(s *Scope) *Nav
+```
+
+`UseNav` returns the `*Nav` handle for the nearest enclosing `NavStack`. If called outside a `NavStack` it returns a no-op handle, so you never need to nil-check.
+
+```go
+func (v HomeView) Body(s *gova.Scope) gova.View {
+    nav := gova.UseNav(s)
+
+    return gova.Button("Open detail", func() {
+        nav.Push(DetailView{ID: 42})
+    })
+}
+```
+
+### Nav methods
+
+```go
+func (n *Nav) Push(v any)
+func (n *Nav) Pop()
+func (n *Nav) PopToRoot()
+func (n *Nav) Replace(v any)
+func (n *Nav) CanPop() bool
+func (n *Nav) Depth() int
+```
+
+| Method | Behaviour |
+|---|---|
+| `Push(v)` | Appends a view; it becomes the active screen |
+| `Pop()` | Removes the top entry; no-op when only the root is on the stack |
+| `PopToRoot()` | Removes every view above the root |
+| `Replace(v)` | Swaps the current top in place without animating a push |
+| `CanPop()` | Returns `true` when there is more than one view on the stack |
+| `Depth()` | Returns the number of views currently on the stack |
+
+`Push`, `Pop`, `Replace`, and `PopToRoot` each take an internal mutex and then update the underlying `StateValue[[]View]`, making them safe to call from any goroutine.
+
+## NavLink
+
+```go
+func NavLink(label string, dest any) View
+```
+
+`NavLink` renders as an accent-colored, tappable text label. Tapping it pushes `dest` onto the nearest `NavStack`. It is equivalent to calling `UseNav(s).Push(dest)` from a tap handler, but expressed declaratively.
+
+`dest` can be:
+
+- A `View` or `Viewable` struct (constructed eagerly; `Body` runs only when tapped).
+- A `func() View` for fully lazy construction when building the view is expensive.
+- A `func() any` when the lazy constructor returns a `Viewable`.
+
+```go
+// Eager destination — DetailView{} is allocated now, Body runs on tap
+gova.NavLink("Open note", DetailView{ID: note.ID})
+
+// Lazy destination — closure runs only when the link is tapped
+gova.NavLink("Open editor", func() gova.View {
+    return EditorView{Payload: heavyPayload()}
+})
+```
+
+`NavLink` sets the `RoleLink` accessibility role and copies the label to the accessibility label automatically.
+
+## Title bar and toolbar
+
+Each view can declare a title and toolbar items that the enclosing `NavStack` renders in its title bar.
+
+```go
+func (n *viewNode) NavTitle(title string) *viewNode
+func (n *viewNode) NavToolbar(items ...ToolbarItem) *viewNode
+
+func ToolbarLeading(v any) ToolbarItem
+func ToolbarTrailing(v any) ToolbarItem
+```
+
+Apply these modifiers on the view node returned by `Body`:
+
+```go
+func (v DetailView) Body(s *gova.Scope) gova.View {
+    nav := gova.UseNav(s)
+
+    return gova.VStack(
+        gova.Text(v.Title),
+    ).
+        NavTitle(v.Title).
+        NavToolbar(
+            gova.ToolbarTrailing(gova.Button("Edit", func() {
+                nav.Push(EditView{ID: v.ID})
+            })),
+        )
+}
+```
+
+When the stack has more than one entry, the title bar automatically renders a back button on the leading side — you do not need to add one.
+
+## Example: notes list → detail
+
+The notes example app uses a `TabView` rather than a bare `NavStack`, but the pattern for push-pop navigation is identical. Below is a self-contained version extracted from the example that shows a list screen pushing to a detail screen.
+
+```go
+type Note struct {
+    ID    int
+    Title string
+    Body  string
+}
+
+// NoteList is the root view of the NavStack.
+type NoteList struct{}
+
+func (NoteList) Body(s *gova.Scope) gova.View {
+    notes := []Note{
+        {ID: 1, Title: "Buy groceries", Body: "Milk, eggs, bread"},
+        {ID: 2, Title: "Call dentist", Body: "Ask about appointment"},
+    }
+
+    rows := make([]gova.View, len(notes))
+    for i, n := range notes {
+        note := n // capture
+        rows[i] = gova.NavLink(note.Title, NoteDetail{Note: note})
+    }
+
+    return gova.VStack(rows...).
+        Padding(gova.SpaceMD).
+        NavTitle("Notes")
+}
+
+// NoteDetail is pushed onto the stack when a row is tapped.
+type NoteDetail struct{ Note Note }
+
+func (v NoteDetail) Body(s *gova.Scope) gova.View {
+    nav := gova.UseNav(s)
+
+    return gova.VStack(
+        gova.Text(v.Note.Body),
+        gova.Spacer(),
+        gova.Button("Back", nav.Pop),
+    ).
+        Padding(gova.SpaceMD).
+        NavTitle(v.Note.Title)
+}
+
+var App = gova.Define(func(s *gova.Scope) gova.View {
+    return gova.NavStack(NoteList{})
+})
+```
+
+Tapping any row calls `NavLink`, which pushes `NoteDetail` onto the stack. The title bar updates automatically, and tapping the auto-generated back button — or calling `nav.Pop()` — returns to the list.

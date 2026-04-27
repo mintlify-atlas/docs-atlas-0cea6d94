@@ -1,0 +1,93 @@
+---
+title: "Setting a runtime app icon for your Gova application"
+description: "Configure a runtime app icon via AppConfig.Icon or AppConfig.IconBytes for the window, macOS dock, and taskbar on Linux and Windows simultaneously."
+---
+
+The `AppConfig.Icon` and `AppConfig.IconBytes` fields give you one place to set
+the icon the OS shows while your app is running — the macOS dock tile, the
+Windows taskbar button, and the Linux window manager icon are all updated from
+the same source.
+
+## Icon field
+
+`AppConfig.Icon` accepts a path to a PNG file on disk.
+
+```go
+g.RunWithConfig(g.AppConfig{
+    Title: "Notes",
+    Icon:  "assets/icon.png",
+}, App)
+```
+
+If the file is missing or unreadable, Gova silently skips the call — the OS
+shows its default placeholder and the app continues normally. No error is
+returned and no panic occurs.
+
+**Recommended size:** a square PNG with transparency at **256×256** or
+**512×512** pixels. Fyne scales the resource for every surface (dock,
+taskbar, title bar, About box), so one file covers all sizes.
+
+## Embedding with `go:embed`
+
+`AppConfig.IconBytes` accepts raw PNG bytes, which makes it easy to embed the
+icon at compile time and ship a single-file binary with no sibling assets.
+
+```go
+package main
+
+import (
+    _ "embed"
+
+    g "github.com/nv404/gova"
+)
+
+//go:embed assets/icon.png
+var appIcon []byte
+
+func main() {
+    g.RunWithConfig(g.AppConfig{
+        Title:     "Notes",
+        IconBytes: appIcon,
+    }, App)
+}
+```
+
+When both `Icon` and `IconBytes` are set, `IconBytes` takes priority.
+
+## Platform support
+
+| Surface | macOS | Windows | Linux |
+|---|---|---|---|
+| Window title bar | Supported | Supported | Supported |
+| Dock / taskbar icon | Supported | Supported | Supported |
+
+On macOS, Gova calls `[NSApp setApplicationIconImage:]` directly so the dock
+icon updates even for unbundled binaries started with `go run`. Setting the
+icon through Fyne alone does not do this — the dock keeps the default Go
+terminal icon.
+
+## Bundling for distribution
+
+The runtime icon is what the OS shows while the app is running. It is separate
+from the icon embedded in the binary or app bundle that Finder, Explorer, and
+the launcher show before the app starts. Use Fyne's packager for that:
+
+```bash
+# macOS .app bundle
+fyne package -os darwin -icon assets/icon.png -name "Notes"
+
+# Windows .exe with resource
+fyne package -os windows -icon assets/icon.png -name "Notes"
+
+# Linux tarball with .desktop file
+fyne package -os linux -icon assets/icon.png -name "Notes"
+```
+
+You typically want both: `AppConfig.Icon` (or `IconBytes`) for the running
+process, and a packaged icon for the binary on disk. The same PNG works for
+both.
+
+<Note>
+  There is no supported API for changing the icon after `Run` starts. If you
+  need per-window icons, open an issue describing the use case.
+</Note>

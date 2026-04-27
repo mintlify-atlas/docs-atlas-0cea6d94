@@ -1,0 +1,182 @@
+---
+title: "Install Gova and set up your Go environment"
+description: "Step-by-step guide to installing Gova, meeting its C toolchain prerequisites on macOS, Linux, and Windows, and running your first window."
+---
+
+Gova renders native windows through a C-backed graphics layer, so you need a C compiler in addition to Go 1.26 or later. This page walks you through satisfying those prerequisites on every supported platform, adding Gova to your module, and opening your first window.
+
+## Prerequisites
+
+Before you install Gova, make sure you have Go 1.26 or later:
+
+```bash
+go version
+# go version go1.26.2 darwin/arm64
+```
+
+You also need a C compiler. The toolchain you need depends on your operating system.
+
+<Tabs>
+  <Tab title="macOS">
+    Install the Xcode Command Line Tools. If you already have Xcode installed, this is a no-op.
+
+    ```bash
+    xcode-select --install
+    ```
+
+    Verify the compiler is available:
+
+    ```bash
+    clang --version
+    ```
+  </Tab>
+  <Tab title="Linux">
+    Install GCC, the standard C library headers, and the OpenGL development libraries. The package names vary by distribution.
+
+    ```bash
+    # Debian / Ubuntu
+    sudo apt-get install build-essential libgl1-mesa-dev xorg-dev
+    ```
+
+    ```bash
+    # Fedora / RHEL
+    sudo dnf install gcc libGL-devel libX11-devel
+    ```
+
+    Verify:
+
+    ```bash
+    gcc --version
+    ```
+  </Tab>
+  <Tab title="Windows">
+    Install [MinGW-w64](https://www.mingw-w64.org/) so that `gcc` is available on your `PATH`. The simplest approach is to install it via [MSYS2](https://www.msys2.org/):
+
+    1. Download and run the MSYS2 installer from https://www.msys2.org/.
+    2. Open the **MSYS2 MinGW 64-bit** shell and run:
+
+    ```bash
+    pacman -S mingw-w64-x86_64-gcc
+    ```
+
+    3. Add `C:\msys64\mingw64\bin` (or wherever MSYS2 installed to) to your system `PATH`.
+
+    Verify in a new terminal:
+
+    ```bash
+    gcc --version
+    ```
+
+    <Note>
+      CGO is required. Make sure `CGO_ENABLED=1` (the default) is set when you build.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Install Gova
+
+<Steps>
+  <Step title="Add Gova to your module">
+    Run `go get` from inside your Go module:
+
+    ```bash
+    go get github.com/nv404/gova@latest
+    ```
+
+    This adds Gova and its transitive dependencies (including the Fyne rendering backend) to your `go.mod`.
+  </Step>
+
+  <Step title="Install the optional CLI">
+    The `gova` CLI provides hot reload and a build shortcut. It is optional — you can use `go run` and `go build` directly — but the dev workflow is much smoother with it.
+
+    ```bash
+    go install github.com/nv404/gova/cmd/gova@latest
+    ```
+
+    Confirm it is on your `PATH`:
+
+    ```bash
+    gova version
+    # gova 0.1.0
+    ```
+
+    The CLI supports four sub-commands:
+
+    | Command | Description |
+    |---|---|
+    | `gova dev [pkg]` | Watch for file changes and rebuild/restart automatically |
+    | `gova build [pkg]` | Compile the package to `./bin/<name>` |
+    | `gova run [pkg]` | Build and run once |
+    | `gova version` | Print the CLI version |
+  </Step>
+
+  <Step title="Write a Hello World app">
+    Create a new module and add a `main.go`:
+
+    ```bash
+    mkdir hello && cd hello
+    go mod init example.com/hello
+    go get github.com/nv404/gova@latest
+    ```
+
+    ```go main.go
+    package main
+
+    import g "github.com/nv404/gova"
+
+    func main() {
+        g.Run("Hello", g.Define(func(s *g.Scope) g.View {
+            return g.Text("Hello, Gova!")
+        }))
+    }
+    ```
+
+    ```bash
+    go run .
+    ```
+
+    A native window titled **Hello** appears with the text "Hello, Gova!".
+  </Step>
+</Steps>
+
+## `Run` vs `RunWithConfig`
+
+`Run` is a convenience wrapper that opens a window with a default size (400 × 600 points) and no custom theme or icon:
+
+```go
+g.Run("My App", root)
+```
+
+When you need more control, call `RunWithConfig` with an `AppConfig` struct:
+
+```go
+g.RunWithConfig(g.AppConfig{
+    Title:  "My App",
+    Width:  800,
+    Height: 600,
+    Theme:  &g.Theme{Variant: g.ThemeDark},
+    Icon:   "assets/icon.png",   // path to a PNG file
+    // IconBytes: iconData,       // or embed the bytes directly
+}, root)
+```
+
+### `AppConfig` fields
+
+| Field | Type | Description |
+|---|---|---|
+| `Title` | `string` | Window title bar text. |
+| `Width` | `float32` | Initial window width in points. Defaults to 400. |
+| `Height` | `float32` | Initial window height in points. Defaults to 600. |
+| `Theme` | `*Theme` | Custom theme. `nil` uses the platform default. |
+| `Icon` | `string` | Path to a PNG file used as the app and window icon. 256 × 256 or 512 × 512 pixels recommended. A missing file is silently ignored. |
+| `IconBytes` | `[]byte` | Embedded icon bytes (e.g. via `//go:embed`). Takes precedence over `Icon` when both are set. |
+
+<Tip>
+  Use `IconBytes` together with `//go:embed` to bundle the icon inside the binary so you ship a single self-contained executable.
+</Tip>
+
+## What's next
+
+- Follow the [quickstart](/getting-started/quickstart) to build a counter app with reactive state.
+- Learn how [components and the `Viewable` interface](/concepts/components) work.
+- Explore the [layout primitives](/layout/stacks) — `VStack`, `HStack`, `Scaffold`, and more.

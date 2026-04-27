@@ -1,0 +1,158 @@
+---
+title: "Stacks: VStack, HStack, and ZStack layouts"
+description: "Compose Gova UIs with VStack for vertical flow, HStack for horizontal, and ZStack for layering. Control spacing, alignment, and nesting freely."
+---
+
+Stacks are the core layout primitives in Gova. `VStack` arranges children top-to-bottom, `HStack` arranges them left-to-right, and `ZStack` layers them on top of each other. All three accept any number of viewable arguments — a `View`, a `Viewable`, or `nil` to skip a slot.
+
+```go
+func VStack(children ...any) *viewNode
+func HStack(children ...any) *viewNode
+func ZStack(children ...any) *viewNode
+```
+
+## VStack
+
+`VStack` flows children vertically with an optional gap between them.
+
+```go
+gova.VStack(
+    gova.Text("Title").Font(gova.Title).Bold(),
+    gova.Text("Subtitle").Font(gova.Caption).Color(gova.Secondary),
+    gova.Button("Get started", onStart).Style(gova.ButtonPrimary),
+).Spacing(gova.SpaceMD).Align(gova.Center)
+```
+
+## HStack
+
+`HStack` flows children horizontally. Use it for toolbars, label-value rows, or any side-by-side arrangement.
+
+```go
+gova.HStack(
+    gova.Image("avatar.png").Frame(40, 40).CornerRadius(20),
+    gova.VStack(
+        gova.Text(user.Name).Bold(),
+        gova.Text(user.Bio).Font(gova.Caption).Color(gova.Secondary),
+    ).Spacing(gova.SpaceXS).Grow(),
+    gova.Button("Follow", onFollow),
+).Spacing(gova.SpaceSM).Padding(gova.SpaceMD)
+```
+
+## ZStack
+
+`ZStack` places all children at the same position, layering them like a stack of cards. The default alignment is `Center`; change it with `.Align()` to pin overlaid views to a corner or edge.
+
+```go
+gova.ZStack(
+    gova.Image("hero.jpg").Frame(0, 200).Fill(gova.FillCover),
+    gova.VStack(
+        gova.Text("Hello, world").Font(gova.Title).Bold().Color(gova.White),
+    ).Align(gova.BottomLeading).Padding(gova.SpaceMD),
+).Align(gova.BottomLeading)
+```
+
+## Spacing
+
+`.Spacing(s float32)` sets the gap between children in pixels. Prefer the
+[spacing tokens](/layout/modifiers#spacing-tokens) for visual consistency:
+
+| Token | Value |
+|-------|-------|
+| `SpaceXS` | 4 px |
+| `SpaceSM` | 8 px |
+| `SpaceMD` | 16 px |
+| `SpaceLG` | 24 px |
+| `SpaceXL` | 32 px |
+
+```go
+gova.VStack(
+    gova.Text("First"),
+    gova.Text("Second"),
+    gova.Text("Third"),
+).Spacing(gova.SpaceSM)
+```
+
+## Alignment
+
+`.Align(a Alignment)` controls cross-axis alignment. In a `VStack` that is the horizontal axis; in an `HStack` it is the vertical axis. `ZStack` uses both axes.
+
+```go
+const (
+    AlignCenter
+    AlignLeading
+    AlignTrailing
+    AlignTop
+    AlignBottom
+    AlignTopLeading
+    AlignTopTrailing
+    AlignBottomLeading
+    AlignBottomTrailing
+)
+```
+
+Short-form aliases (`Leading`, `Trailing`, `Top`, `Bottom`, `Center`, etc.) are available so you can omit the `Align` prefix:
+
+```go
+gova.VStack(...).Align(gova.Leading)   // items flush left
+gova.HStack(...).Align(gova.Top)       // items flush to top
+gova.ZStack(...).Align(gova.BottomTrailing)
+```
+
+## Spacer
+
+`Spacer()` inserts a flexible gap that expands to fill remaining space along the stack's primary axis. Place it between two children to push them to opposite ends.
+
+```go
+gova.HStack(
+    gova.Text("App Name").Font(gova.Title).Bold(),
+    gova.Spacer(),
+    gova.Button("Settings", onSettings),
+)
+```
+
+## Group
+
+`Group(children...)` flattens its children directly into the parent layout. It is the escape hatch for Go's variadic spread restriction — you cannot mix a `...` spread with additional positional arguments in a single call, but you can wrap one set inside `Group`.
+
+```go
+var extraRows = []gova.View{row4, row5, row6}
+
+gova.VStack(
+    gova.Text("Header"),
+    gova.Group(extraRows...),
+    gova.Text("Footer"),
+)
+```
+
+## Growing a child
+
+A child with `.Grow()` expands to fill all remaining space on the primary axis; siblings pack at their natural size. Only the first grow child in a stack participates.
+
+```go
+gova.HStack(
+    gova.TextField(input).
+        Placeholder("What needs to be done?").
+        MinHeight(36).
+        Grow(),
+    gova.Button("Add", onAdd),
+).Spacing(gova.SpaceSM)
+```
+
+## Nesting stacks
+
+Stacks compose freely. Building a card with a title row and a body is a natural pattern:
+
+```go
+gova.VStack(
+    gova.HStack(
+        gova.Text("Card Title").Font(gova.Title3).Bold().Grow(),
+        gova.Text("12 min ago").Font(gova.Caption).Color(gova.Secondary),
+    ).Spacing(gova.SpaceXS),
+    gova.Divider(),
+    gova.Text(card.Body).Font(gova.Body),
+).
+    Padding(gova.SpaceMD).
+    Background(gova.Surface).
+    CornerRadius(8).
+    Stroke(gova.BorderColor, 1)
+```
